@@ -15,20 +15,30 @@ import { appCode, CodeBlock, gameCode } from "../game/codeView";
 import { CONCEPTS, type JournalEntry, type Permissions, type Project, type ProjectVersion } from "../../../shared/types";
 import type { GameBug, GameCheck, GameSpec } from "../../../shared/game";
 import type { AppSpec } from "../../../shared/app";
-import type { SceneSpec, StorySpec } from "../../../shared/creations";
+import type { CodeSpec, SceneSpec, StorySpec } from "../../../shared/creations";
+import { CodeRunner } from "../game/CodeMode";
+import { AgentPanel, CodeBuildTab, ShareExtras, TeamTab } from "./ProjectExtras";
 
-interface Detail {
+export interface Detail {
   project: Project;
   versions: ProjectVersion[];
   journal: JournalEntry[];
   shares: { token: string; audience: string; status: string; allowRemix: boolean; slug: string | null; views: number; plays: number; createdAt: string }[];
   concepts: string[];
   permissions: Permissions;
+  role: "owner" | "collaborator";
+  owner: string | null;
+  collaborators: { id: string; name: string; avatar: string; role: string }[];
+  tasks: { id: string; text: string; assignee: string | null; done: boolean }[];
+  reactions: { kind: string; value: string; n: number }[];
+  deployment: { repo: string; repoUrl: string; pagesUrl: string | null; version: number; updatedAt: string } | null;
+  githubReady: boolean;
 }
 
-type Tab = "play" | "build" | "explain" | "code" | "test" | "share" | "history";
+type Tab = "play" | "build" | "explain" | "code" | "test" | "share" | "history" | "team";
 
 function Viewer({ p, onEnd, onStart }: { p: Project; onEnd?: (r: { result: string; score: number }) => void; onStart?: () => void }) {
+  if (p.type === "code") return <CodeRunner spec={p.spec as CodeSpec} />;
   if (p.type === "game") return <GamePlayer key={p.version} spec={p.spec as GameSpec} onEnd={onEnd} onStart={onStart} />;
   if (p.type === "app") return <AppPlayer key={p.version} spec={p.spec as AppSpec} ask={async (question) => (await api.post<{ reply: string }>(`/kid/guide/${p.id}`, { question })).reply} />;
   if (p.type === "image") {
@@ -81,9 +91,14 @@ export function ProjectStudio() {
   if (!data) return error ? <ErrorBox error={error} /> : <Loading />;
   const p = data.project;
   const interactive = p.type === "game" || p.type === "app";
-  const tabs: [Tab, string][] = interactive
-    ? [["play", "▶ PLAY"], ["build", "🧩 BUILD"], ["explain", "💡 EXPLAIN"], ["code", "</> CODE"], ["test", "✅ TEST"], ["share", "👋 SHARE"], ["history", "🕰️ HISTORY"]]
-    : [["play", "👀 VIEW"], ["build", "✏️ EDIT"], ["explain", "💡 EXPLAIN"], ["share", "👋 SHARE"], ["history", "🕰️ HISTORY"]];
+  const owner = data.role === "owner";
+  const tabs: [Tab, string][] = (
+    p.type === "code"
+      ? [["play", "▶ RUN"], ["build", "⌨️ CODE"], ["explain", "💡 EXPLAIN"], ["team", "👥 TEAM"], ["share", "👋 SHARE"], ["history", "🕰️ HISTORY"]]
+      : interactive
+        ? [["play", "▶ PLAY"], ["build", "🧩 BUILD"], ["explain", "💡 EXPLAIN"], ["code", "</> CODE"], ["test", "✅ TEST"], ["team", "👥 TEAM"], ["share", "👋 SHARE"], ["history", "🕰️ HISTORY"]]
+        : [["play", "👀 VIEW"], ["build", "✏️ EDIT"], ["explain", "💡 EXPLAIN"], ["share", "👋 SHARE"], ["history", "🕰️ HISTORY"]]
+  ).filter(([t]) => (t !== "share" || owner) && (t !== "team" || !owner || data.permissions.collaboration)) as [Tab, string][];
   const refresh = async (rewards?: Rewards | null) => {
     showRewards(rewards);
     await reload();
@@ -110,7 +125,7 @@ export function ProjectStudio() {
           <span style={{ fontSize: "2.4rem" }}>{p.emoji}</span>
           <div>
             <h1 style={{ margin: 0 }}>{p.title}</h1>
-            <span className="muted small" style={{ fontWeight: 800 }}>{TYPE_INFO[p.type].emoji} {TYPE_INFO[p.type].label} · version {p.version}{p.remixedFrom ? " · 🔄 remix" : ""}</span>
+            <span className="muted small" style={{ fontWeight: 800 }}>{TYPE_INFO[p.type].emoji} {TYPE_INFO[p.type].label} · version {p.version}{p.remixedFrom ? " · 🔄 remix" : ""}{data.owner ? ` · 🤝 building with ${data.owner}` : ""}</span>
           </div>
         </div>
         {(p.type === "image" || p.type === "story") && data.permissions.gameCreation && (
@@ -126,7 +141,10 @@ export function ProjectStudio() {
       {actionError && <div className="error">{actionError}</div>}
 
       {tab === "play" && <PlayTab p={p} onRewards={showRewards} onImprove={() => setTab("build")} />}
-      {tab === "build" && (
+      {tab === "build" && p.type === "code" && (
+        <CodeBuildTab d={data} saving={saving} onSave={saveSpec} onChanged={refresh} onReplace={(proj) => setData({ ...data, project: proj })} />
+      )}
+      {tab === "build" && p.type !== "code" && (
         <BuildTab
           d={data}
           focus={focus}
@@ -138,9 +156,10 @@ export function ProjectStudio() {
         />
       )}
       {tab === "explain" && <ExplainTab d={data} age={me?.child?.age ?? 10} onDone={refresh} goCode={() => setTab("code")} />}
-      {tab === "code" && <CodeTab p={p} onRewards={showRewards} />}
+      {tab === "code" && <CodeTab p={p} onRewards={showRewards} canEject={data.permissions.codeMode} />}
       {tab === "test" && <TestTab p={p} onRewards={showRewards} onFixed={refresh} onTry={(where) => { setFocus(focusSection(where) === "screens" ? where : focusSection(where)); setTab("build"); }} />}
       {tab === "share" && <ShareTab d={data} onDone={refresh} />}
+      {tab === "team" && <TeamTab d={data} onDone={refresh} />}
       {tab === "history" && <HistoryTab d={data} onDone={refresh} onDeleted={() => nav("/kid/creations")} />}
     </div>
   );
@@ -260,6 +279,7 @@ function BuildTab({ d, focus, saving, onSave, onChanged, onFocus, onReplace }: {
             />
           ))}
         </div>
+        {(p.type === "game" || p.type === "app") && d.permissions.aiAgents && <AgentPanel p={p} onChanged={onChanged} onReplace={onReplace} />}
         {interactiveSide(p)}
       </div>
       <div>
@@ -358,7 +378,9 @@ function ExplainTab({ d, age, onDone, goCode }: { d: Detail; age: number; onDone
   );
 }
 
-function CodeTab({ p, onRewards }: { p: Project; onRewards: (r: Rewards | null) => void }) {
+function CodeTab({ p, onRewards, canEject }: { p: Project; onRewards: (r: Rewards | null) => void; canEject: boolean }) {
+  const nav = useNavigate();
+  const [ejecting, setEjecting] = useState(false);
   const logged = useRef(false);
   useEffect(() => {
     if (logged.current) return;
@@ -373,6 +395,17 @@ function CodeTab({ p, onRewards }: { p: Project; onRewards: (r: Rewards | null) 
         <p style={{ margin: 0 }}>This is your {p.type} written as code. Every line matches something you can change in BUILD mode. Change a number there, and watch it change here!</p>
       </div>
       <CodeBlock code={code} />
+      {p.type === "game" && canEject && (
+        <div className="card tint-violet row between">
+          <span><b>⌨️ Ready for real code?</b><br /><span className="small">Turn this game into JavaScript you can change line by line. Your game stays as it is — you get a new code project.</span></span>
+          <button className="btn" disabled={ejecting} onClick={async () => {
+            setEjecting(true);
+            const r = await api.post<{ project: Project; rewards: Rewards }>(`/kid/projects/${p.id}/eject`);
+            onRewards(r.rewards);
+            nav(`/kid/project/${r.project.id}?tab=build`);
+          }}>Open in Code Mode →</button>
+        </div>
+      )}
       <details className="card">
         <summary style={{ cursor: "pointer", fontWeight: 800 }}>🗂️ See the raw data (JSON) the SparkForge engine reads</summary>
         <div className="code" style={{ marginTop: 10, maxHeight: 400, overflow: "auto" }}>{JSON.stringify(p.spec, null, 2)}</div>
@@ -426,6 +459,15 @@ function TestTab({ p, onRewards, onFixed, onTry }: { p: Project; onRewards: (r: 
 }
 
 function ShareTab({ d, onDone }: { d: Detail; onDone: (r: Rewards | null) => Promise<void> }) {
+  return (
+    <div className="narrow stack">
+      <ShareBasics d={d} onDone={onDone} />
+      <ShareExtras d={d} onDone={onDone} />
+    </div>
+  );
+}
+
+function ShareBasics({ d, onDone }: { d: Detail; onDone: (r: Rewards | null) => Promise<void> }) {
   const p = d.project;
   const perms = d.permissions;
   const [remix, setRemix] = useState(false);
@@ -500,8 +542,8 @@ function ShareTab({ d, onDone }: { d: Detail; onDone: (r: Rewards | null) => Pro
             {contacts!.map((c) => (
               <button key={c.id} className="btn ghost" onClick={async () => {
                 try {
-                  await api.post(`/kid/projects/${p.id}/send`, { contactId: c.id, token: active.token });
-                  setMsg(`📬 Sent to ${c.name}!`);
+                  const r = await api.post<{ status: string }>(`/kid/projects/${p.id}/email`, { contactId: c.id, token: active.token });
+                  setMsg(r.status === "sent" ? `📬 Sent to ${c.name}!` : `📬 Saved for ${c.name} — a grown-up will pass it on.`);
                 } catch (e) {
                   setErr(errorText(e));
                 }
@@ -527,7 +569,7 @@ function HistoryTab({ d, onDone, onDeleted }: { d: Detail; onDone: (r: Rewards |
           <div key={v.version} className="row between" style={{ borderBottom: "1px solid var(--line)", paddingBottom: 10 }}>
             <span>
               <b>v{v.version}</b> {v.summary} <br />
-              <span className="small muted">{authors[v.author]} · {timeAgo(v.createdAt)}</span>
+              <span className="small muted">{authors[v.author]}{v.byName && (v.author !== "child" || d.collaborators.length) ? ` (${v.byName})` : ""} · {timeAgo(v.createdAt)}</span>
             </span>
             <div className="row">
               <button className="btn ghost sm" onClick={async () => setPreview({ version: v.version, spec: (await api.get<{ spec: unknown }>(`/kid/projects/${p.id}/versions/${v.version}`)).spec })}>👀 Look</button>
@@ -546,7 +588,7 @@ function HistoryTab({ d, onDone, onDeleted }: { d: Detail; onDone: (r: Rewards |
         ))}
         {err && <div className="error">{err}</div>}
       </div>
-      <button className="btn danger" onClick={async () => { if (confirm(`Delete “${p.title}”? This can't be undone.`)) { await api.del(`/kid/projects/${p.id}`); onDeleted(); } }}>🗑️ Delete this project</button>
+      {d.role === "owner" && <button className="btn danger" onClick={async () => { if (confirm(`Delete “${p.title}”? This can't be undone.`)) { await api.del(`/kid/projects/${p.id}`); onDeleted(); } }}>🗑️ Delete this project</button>}
       {preview && (
         <Modal onClose={() => setPreview(null)}>
           <div className="row between"><h3>Version {preview.version}</h3><button className="btn ghost sm" onClick={() => setPreview(null)}>Close</button></div>

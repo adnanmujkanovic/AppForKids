@@ -6,7 +6,7 @@ import { Loading, timeAgo } from "./ui";
 
 export const Brand = () => (
   <Link to="/" className="brand">
-    <span className="mark">✨</span> SparkForge <span className="muted" style={{ fontWeight: 800 }}>Kids</span>
+    <span className="mark">✨</span> SparkForge <span className="muted hide-sm" style={{ fontWeight: 800 }}>Kids</span>
   </Link>
 );
 
@@ -52,6 +52,12 @@ function Bell() {
 
 export function KidShell({ children }: { children: ReactNode }) {
   const { me } = useSession();
+  // The visual language matures with the child: a calmer "studio" look from age 12.
+  const mature = (me?.child?.age ?? 0) >= 12;
+  useEffect(() => {
+    document.body.classList.toggle("mature", mature);
+    return () => document.body.classList.remove("mature");
+  }, [mature]);
   if (!me) return <Loading />;
   if (me.role !== "child") return <Navigate to={me.role === "parent" ? "/parent" : "/"} replace />;
   return (
@@ -60,7 +66,7 @@ export function KidShell({ children }: { children: ReactNode }) {
         <div className="inner">
           <Brand />
           <span className="spacer" />
-          {!me.ai.live && <span className="chip sun small" title="No AI model is connected. SparkForge uses a built-in practice helper.">🧪 Practice AI</span>}
+          {!me.ai.live && <span className="chip sun small" title="No AI model is connected. SparkForge uses a built-in practice helper.">🧪<span className="hide-sm"> Practice AI</span></span>}
           <Bell />
           <Link to="/kid/passport" className="avatar" title="My Creator Passport">{me.child?.avatar}</Link>
           <Link to="/login?grownup=1" className="btn ghost sm" title="Grown-ups: sign in to the parent area">👪</Link>

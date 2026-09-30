@@ -267,3 +267,17 @@ button.chip:hover { filter: brightness(0.97); }
 .codeedit .gutter .err { color: #fff; background: #d94a3b; border-radius: 4px; padding: 0 3px; }
 .codeedit textarea { flex: 1; border: 0; border-radius: 0; background: transparent; color: #e8e4ff; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.85rem; line-height: 1.6; padding: 14px 12px; resize: none; min-height: 0; white-space: pre; overflow: auto; tab-size: 2; }
 .codeedit textarea:focus { border: 0; }
+
+/* Studio look for older creators (12+): calmer, more like real developer tools. */
+body.mature { --violet: #4f46e5; --bg: #f4f5f8; }
+body.mature .hero-ask { background: linear-gradient(135deg, #1d1b2e 0%, #312e81 100%); }
+body.mature .tile .ic { font-size: 1.6rem; }
+body.mature .tile { min-height: 110px; border-radius: 16px; }
+body.mature .btn { box-shadow: none; border-radius: 12px; }
+body.mature h1 { letter-spacing: -0.02em; }
+
+@media (max-width: 520px) {
+  .hide-sm { display: none; }
+  .topbar .inner { gap: 8px; padding: 8px 12px; }
+  .brand { font-size: 1.02rem; }
+}

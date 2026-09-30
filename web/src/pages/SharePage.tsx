@@ -11,11 +11,63 @@ import { AppPlayer } from "../game/AppPlayer";
 import { StoryView } from "../game/CreationEditors";
 import type { GameSpec } from "../../../shared/game";
 import type { AppSpec } from "../../../shared/app";
-import type { SceneSpec, StorySpec } from "../../../shared/creations";
+import type { CodeSpec, SceneSpec, StorySpec } from "../../../shared/creations";
+import { CodeRunner } from "../game/CodeMode";
+
+interface Social {
+  emojis: string[];
+  comments: string[];
+  canReact: boolean;
+  canComment: boolean;
+  mine: { kind: string; value: string }[];
+  options: { emojis: string[]; comments: string[] };
+}
+
+/** Friends react with emojis and preset kind comments. No counts, no free-text chat. */
+function Reactions({ token }: { token: string }) {
+  const { data, reload } = useLoad(() => api.get<Social>(`/share/${token}/social`), [token]);
+  const [err, setErr] = useState<string | null>(null);
+  if (!data || (!data.emojis.length && !data.comments.length && !data.canReact && !data.canComment)) return null;
+  const mine = new Set(data.mine.map((m) => `${m.kind}:${m.value}`));
+  const react = async (kind: string, value: string) => {
+    try {
+      await api.post(`/kid/react/${token}`, { kind, value });
+      reload();
+    } catch (e) {
+      setErr(errorText(e));
+    }
+  };
+  return (
+    <div className="card stack narrow" style={{ width: "100%" }}>
+      <h3>💬 Friends say</h3>
+      {(data.emojis.length > 0 || data.comments.length > 0) && (
+        <div className="row" style={{ gap: 6 }}>
+          {data.emojis.map((e) => <span key={e} className="chip sun" style={{ fontSize: "1.1rem" }}>{e}</span>)}
+          {data.comments.map((c) => <span key={c} className="chip sky">{c}</span>)}
+        </div>
+      )}
+      {data.canReact && (
+        <div className="row" style={{ gap: 6 }}>
+          {data.options.emojis.map((e) => (
+            <button key={e} className={`chip ${mine.has(`emoji:${e}`) ? "selected" : "gray"}`} style={{ fontSize: "1.2rem" }} onClick={() => react("emoji", e)}>{e}</button>
+          ))}
+        </div>
+      )}
+      {data.canComment && (
+        <div className="row" style={{ gap: 6 }}>
+          {data.options.comments.map((c) => (
+            <button key={c} className={`chip ${mine.has(`comment:${c}`) ? "selected" : "gray"}`} onClick={() => react("comment", c)}>{c}</button>
+          ))}
+        </div>
+      )}
+      {err && <div className="error">{err}</div>}
+    </div>
+  );
+}
 
 interface Shared {
   token: string;
-  type: "game" | "app" | "image" | "story";
+  type: "game" | "app" | "image" | "story" | "code";
   title: string;
   emoji: string;
   idea: string;
@@ -76,6 +128,8 @@ export function SharePage() {
         {data.type === "app" && <AppPlayer spec={data.spec as AppSpec} />}
         {data.type === "image" && <div className="card scenecard" style={{ maxWidth: 640, margin: "0 auto", padding: 12 }}><SceneView scene={data.spec as SceneSpec} /></div>}
         {data.type === "story" && <StoryView story={data.spec as StorySpec} />}
+        {data.type === "code" && <div className="narrow" style={{ width: "100%" }}><CodeRunner spec={data.spec as CodeSpec} /></div>}
+        {!data.preview && <Reactions token={data.token} />}
         <div className="grid two narrow" style={{ width: "100%" }}>
           <div className="card"><h3>What is it?</h3><p style={{ margin: 0 }}>{data.description || data.idea}</p></div>
           {data.learned.length > 0 && <div className="card"><h3>💡 What I learned</h3><div className="row" style={{ gap: 6 }}>{data.learned.map((l) => <span key={l} className="chip sky">{l}</span>)}</div></div>}

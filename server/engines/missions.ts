@@ -70,6 +70,40 @@ function checkStep(childId: string, check: string, projects: P[]): boolean {
       return projects.some(
         (p) => p.type === "app" && JSON.parse(p.spec).collections.reduce((s: number, c: { items: unknown[] }) => s + c.items.length, 0) >= Number(a),
       );
+    case "codeproject":
+      return projects.filter((p) => p.type === "code").length >= Number(a);
+    case "codechanged":
+      return (
+        one<{ n: number }>(
+          "SELECT COUNT(*) n FROM events e JOIN projects p ON p.id=e.project_id WHERE e.child_id=? AND e.type='modified' AND p.type='code' AND json_extract(e.data,'$.by')='child'",
+          childId,
+        )?.n ?? 0
+      ) >= Number(a);
+    case "coderan":
+      // "ok": a clean run. "error": an error run later followed by a clean run of the same project (a fixed bug).
+      return a === "ok"
+        ? count("SELECT COUNT(*) n FROM events WHERE child_id=? AND type='code_ran' AND json_extract(data,'$.ok')=1") >= 1
+        : count(
+            `SELECT COUNT(*) n FROM events f WHERE f.child_id=? AND f.type='code_ran' AND json_extract(f.data,'$.ok')=0
+             AND EXISTS (SELECT 1 FROM events g WHERE g.child_id=f.child_id AND g.project_id=f.project_id AND g.type='code_ran'
+                         AND json_extract(g.data,'$.ok')=1 AND g.id>f.id)`,
+          ) >= 1;
+    case "version":
+      return projects.some((p) => (one<{ v: number }>("SELECT version v FROM projects WHERE id=?", p.id)?.v ?? 0) >= Number(a));
+    case "deployed":
+      return count("SELECT COUNT(*) n FROM events WHERE child_id=? AND type='deployed'") >= Number(a);
+    case "friendsent":
+      return count("SELECT COUNT(*) n FROM inbox WHERE from_child=?") >= Number(a);
+    case "team":
+      return (
+        count("SELECT COUNT(*) n FROM collaborators k JOIN projects p ON p.id=k.project_id WHERE p.child_id=?") +
+        count("SELECT COUNT(*) n FROM collaborators WHERE child_id=?")
+      ) >= Number(a);
+    case "taskdone":
+      return (
+        count("SELECT COUNT(*) n FROM project_tasks t JOIN projects p ON p.id=t.project_id WHERE p.child_id=? AND t.done=1") +
+        count("SELECT COUNT(*) n FROM events WHERE child_id=? AND type='helped'")
+      ) >= Number(a);
     case "detective":
       return count("SELECT COUNT(*) n FROM events WHERE child_id=? AND type='detective_solved'") >= Number(a);
     default:

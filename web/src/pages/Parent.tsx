@@ -13,6 +13,7 @@ interface DashChild extends ChildProfile {
   newSkills: string[];
   medals: { id: string; emoji: string; title: string; earnedAt: string }[];
   safety: "ok" | "review" | "attention";
+  friends: { id: string; name: string; avatar: string }[];
   aiToday: number;
   activity14d: number;
 }
@@ -21,7 +22,7 @@ interface Dash {
   alerts: { id: string; childName: string; severity: string; category: string; summary: string; excerpt: string; reviewed: boolean; createdAt: string }[];
   shares: { token: string; childName: string; title: string; emoji: string; audience: string; status: string; allowRemix: boolean; views: number; plays: number; createdAt: string }[];
   contacts: { id: string; name: string; email: string }[];
-  outbox: { id: string; childName: string; to: string; subject: string; body: string; createdAt: string }[];
+  outbox: { id: string; childName: string; to: string; subject: string; body: string; status: string; createdAt: string }[];
   ai: { provider: string; live: boolean };
 }
 
@@ -133,6 +134,7 @@ export function ParentDashboard() {
               <div className="stack" style={{ gap: 10 }}>
                 <div><h4>Curious about</h4><div className="row" style={{ gap: 6 }}>{c.topics.length ? c.topics.map((t) => <span key={t} className="chip gray">{t}</span>) : <span className="muted small">—</span>}</div></div>
                 <div><h4>Skills discovered</h4><div className="row" style={{ gap: 6 }}>{c.newSkills.length ? c.newSkills.map((t) => <span key={t} className="chip sky">{t}</span>) : <span className="muted small">—</span>}</div></div>
+                <div><h4>Friends</h4><div className="row" style={{ gap: 6 }}>{c.friends.length ? c.friends.map((f) => <span key={f.id} className="chip gray">{f.avatar} {f.name}</span>) : <span className="muted small">— add friends in ⚙️ Settings</span>}</div></div>
                 <div><h4>Medals</h4><div className="row" style={{ gap: 6 }}>{c.medals.length ? c.medals.slice(0, 8).map((m) => <span key={m.id} className="chip sun" title={m.title}>{m.emoji} {m.title}</span>) : <span className="muted small">—</span>}</div></div>
               </div>
             </div>
@@ -205,19 +207,113 @@ export function ParentDashboard() {
           {data.outbox.length > 0 && (
             <>
               <h4 style={{ marginTop: 14 }}>Outbox</h4>
-              <p className="small muted">Email delivery isn't connected in this version, so messages are kept here for you to forward.</p>
+              <p className="small muted">Messages are emailed when the server has SMTP settings; otherwise they wait here for you to forward.</p>
               {data.outbox.map((o) => (
                 <div key={o.id} className="small" style={{ padding: "6px 0", borderTop: "1px solid var(--line)" }}>
-                  <b>{o.childName} → {o.to}</b> <span className="muted">{timeAgo(o.createdAt)}</span><br />{o.subject}<br /><span className="muted">{o.body}</span>
+                  <b>{o.childName} → {o.to}</b> <span className={`chip ${o.status === "sent" ? "mint" : o.status === "failed" ? "coral" : "gray"}`}>{o.status === "sent" ? "sent" : o.status === "failed" ? "failed" : "to forward"}</span> <span className="muted">{timeAgo(o.createdAt)}</span><br />{o.subject}<br /><span className="muted" style={{ whiteSpace: "pre-wrap" }}>{o.body}</span>
                 </div>
               ))}
             </>
           )}
         </div>
-        <div className="card flat row between"><span><b>🐙 GitHub</b> <span className="muted small">Real repositories, commits and deployment for older creators.</span></span><span className="chip gray">Coming later</span></div>
+        <GitHubConnector />
       </div>
 
       <AddChild onDone={reload} />
+    </div>
+  );
+}
+
+function GitHubConnector() {
+  const { data, reload } = useLoad(() => api.get<{ github: { account: string; connectedAt: string } | null }>("/parent/connectors"));
+  const [token, setToken] = useState("");
+  const [err, setErr] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="card flat stack">
+      <h4>🐙 GitHub</h4>
+      <p className="small muted" style={{ margin: 0 }}>
+        Lets children save projects as repositories in <b>your</b> GitHub account, and (if public publishing is on) put them on the web with GitHub Pages.
+        Create a <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer">fine-grained token</a> with
+        “Administration”, “Contents” and “Pages” read &amp; write permissions. It's stored encrypted. Turn on “GitHub” per child in ⚙️ Settings.
+      </p>
+      {data?.github ? (
+        <div className="row between">
+          <span className="chip mint">Connected as @{data.github.account}</span>
+          <button className="btn danger sm" onClick={async () => { await api.del("/parent/connectors/github"); reload(); }}>Disconnect</button>
+        </div>
+      ) : (
+        <form className="row" onSubmit={async (e) => {
+          e.preventDefault();
+          setBusy(true);
+          setErr(null);
+          try {
+            await api.post("/parent/connectors/github", { token });
+            setToken("");
+            reload();
+          } catch (ex) {
+            setErr(ex);
+          } finally {
+            setBusy(false);
+          }
+        }}>
+          <input type="password" placeholder="github_pat_…" value={token} onChange={(e) => setToken(e.target.value)} style={{ flex: 1, minWidth: 200 }} autoComplete="off" />
+          <button className="btn sm" disabled={busy || token.length < 20}>{busy ? "Checking…" : "Connect"}</button>
+        </form>
+      )}
+      <ErrorBox error={err} />
+    </div>
+  );
+}
+
+function FriendCodes({ childId, name, onChange }: { childId: string; name: string; onChange: () => void }) {
+  const { data: friends, reload } = useLoad(() => api.get<{ id: string; name: string; avatar: string }[]>(`/parent/children/${childId}/friends`), [childId]);
+  const [code, setCode] = useState<string | null>(null);
+  const [enter, setEnter] = useState("");
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<unknown>(null);
+  return (
+    <div className="card stack">
+      <h3>🤝 {name}'s friends</h3>
+      <p className="small muted" style={{ margin: 0 }}>
+        Friends are connected by parents only. Make a code and give it to the other child's parent (in person or by message) — or enter the code they gave you.
+        Codes work once, for 7 days. Children never see each other's family details.
+      </p>
+      {friends?.map((f) => (
+        <div key={f.id} className="row between">
+          <span>{f.avatar} <b>{f.name}</b></span>
+          <button className="btn danger sm" onClick={async () => { await api.del(`/parent/children/${childId}/friends/${f.id}`); reload(); onChange(); }}>Remove</button>
+        </div>
+      ))}
+      <div className="row">
+        <button className="btn ghost sm" onClick={async () => {
+          setErr(null);
+          try {
+            setCode((await api.post<{ code: string }>(`/parent/children/${childId}/friend-code`)).code);
+          } catch (e) {
+            setErr(e);
+          }
+        }}>Make a friend code</button>
+        {code && <span className="chip sun" style={{ fontSize: "1rem", userSelect: "all" }}>{code}</span>}
+      </div>
+      <form className="row" onSubmit={async (e) => {
+        e.preventDefault();
+        setErr(null);
+        try {
+          const r = await api.post<{ friend: { name: string } }>(`/parent/children/${childId}/friend-code/redeem`, { code: enter });
+          setMsg(`🎉 ${name} and ${r.friend.name} are now friends.`);
+          setEnter("");
+          reload();
+          onChange();
+        } catch (ex) {
+          setErr(ex);
+        }
+      }}>
+        <input type="text" placeholder="Enter a friend code, e.g. STAR-1234-56" value={enter} onChange={(e) => setEnter(e.target.value)} style={{ flex: 1, minWidth: 200 }} />
+        <button className="btn sm" disabled={enter.length < 6}>Add friend</button>
+      </form>
+      {msg && <div className="note">{msg}</div>}
+      <ErrorBox error={err} />
     </div>
   );
 }
@@ -259,6 +355,7 @@ export function ChildSettings() {
           <label className="field">Interests (comma separated)<input type="text" value={c.interests.join(", ")} onChange={(e) => setDraft({ ...c, interests: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })} /></label>
         </div>
       </div>
+      <FriendCodes childId={c.id} name={c.name} onChange={() => {}} />
       {groups.map((g) => (
         <div key={g} className="card stack">
           <h3>{g}</h3>

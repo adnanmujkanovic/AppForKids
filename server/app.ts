@@ -40,7 +40,16 @@ export function createApp() {
 
   const web = resolve("dist/web");
   if (existsSync(web)) {
-    app.use(express.static(web, { index: false, maxAge: "1h" }));
+    app.use(
+      express.static(web, {
+        index: false,
+        maxAge: "1h",
+        setHeaders: (res, file) => {
+          if (file.endsWith("sw.js") || file.endsWith(".webmanifest")) res.setHeader("Cache-Control", "no-cache");
+          else if (file.includes("/assets/")) res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        },
+      }),
+    );
     app.get(/^(?!\/api\/).*/, (_req, res) => res.sendFile(resolve(web, "index.html")));
   }
   return app;

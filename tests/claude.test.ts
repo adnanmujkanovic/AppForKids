@@ -19,7 +19,7 @@ function fakeClient(reply: Record<string, unknown>) {
 
 describe("Claude provider", () => {
   it("sends layered prompts, effort and server-side fallback, and returns parsed output", async () => {
-    const parsed = { reply: "Rust!", topic: "Mars", certainty: "sure", checkTip: "", followUp: "Why?", suggestions: ["game"] };
+    const parsed = { reply: "Rust!", topic: "Mars", certainty: "sure", checkTip: "", followUp: "Why?", suggestions: ["game"], sources: [] };
     const { client, calls } = fakeClient({ stop_reason: "end_turn", parsed_output: parsed, usage: { input_tokens: 10, output_tokens: 5 } });
     const p = new ClaudeProvider("claude-opus-5-5", client);
     const out = await p.chat({ ctx, mode: "explorer", history: [{ role: "assistant", content: "hi" }], message: "Why is Mars red?" });
@@ -55,5 +55,19 @@ describe("Claude provider", () => {
     const g = await new ClaudeProvider("claude-opus-5-5", client).game(ctx, { idea: "space", kind: "catcher", topicNotes: "" });
     expect(g.spec.player.speed).toBe(10);
     expect(g.spec.theme.sky).toMatch(/^#[0-9a-f]{6}$/i);
+  });
+
+  it("adds kid-safe web search only when the parent allows it, and filters sources", async () => {
+    const parsed = { reply: "Yes", topic: "Mars", certainty: "sure", checkTip: "", followUp: "", suggestions: [], sources: ["https://mars.nasa.gov/x", "https://evil.example.com/y"] };
+    const { client, calls } = fakeClient({ stop_reason: "end_turn", parsed_output: parsed, usage: { input_tokens: 1, output_tokens: 1 } });
+    const p = new ClaudeProvider("claude-opus-5-5", client);
+    const off = await p.chat({ ctx, mode: "explorer", history: [], message: "Is there water on Mars?" });
+    expect((calls[0] as { tools?: unknown }).tools).toBeUndefined();
+    expect(off.sources).toEqual([]);
+    const on = await p.chat({ ctx, mode: "explorer", history: [], message: "Is there water on Mars?", webAccess: true });
+    const tools = (calls[1] as { tools: { type: string; allowed_domains: string[] }[] }).tools;
+    expect(tools[0].type).toBe("web_search_20260209");
+    expect(tools[0].allowed_domains).toContain("nasa.gov");
+    expect(on.sources).toEqual(["https://mars.nasa.gov/x"]);
   });
 });

@@ -22,6 +22,14 @@ const STEP_LINKS: Record<string, string> = {
   aiguide: "/kid/apps?idea=A%20Mars%20explorer%20with%20an%20AI%20guide",
   detective: "/kid/detective",
   played: "/kid/creations",
+  codeproject: "/kid/code",
+  codechanged: "/kid/creations",
+  coderan: "/kid/creations",
+  friendsent: "/kid/creations",
+  team: "/kid/friends",
+  taskdone: "/kid/friends",
+  version: "/kid/creations",
+  deployed: "/kid/creations",
 };
 
 export function Missions() {

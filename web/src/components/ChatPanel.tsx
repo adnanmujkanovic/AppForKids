@@ -11,6 +11,7 @@ interface Meta {
   checkTip?: string;
   followUp?: string;
   suggestions?: string[];
+  sources?: string[];
   note?: string;
   privacyTip?: string | null;
   safety?: boolean;
@@ -115,6 +116,14 @@ export function ChatPanel({ thread, placeholder, initial, allowImage, emptyState
                   <div className="meta">
                     {m.meta.certainty && <Certainty value={m.meta.certainty} />}
                     {m.meta.checkTip && <span className="chip gray">🔎 {m.meta.checkTip}</span>}
+                  </div>
+                )}
+                {!!m.meta.sources?.length && (
+                  <div className="meta">
+                    <span className="small muted" style={{ fontWeight: 800 }}>📚 Sources:</span>
+                    {m.meta.sources.map((u) => (
+                      <a key={u} className="chip gray" href={u} target="_blank" rel="noreferrer noopener">{new URL(u).hostname.replace(/^www\./, "")}</a>
+                    ))}
                   </div>
                 )}
                 {m.meta.followUp && <div className="follow">💭 {m.meta.followUp}</div>}
