@@ -83,4 +83,5 @@ export const TYPE_INFO: Record<string, { emoji: string; label: string }> = {
   app: { emoji: "📱", label: "App" },
   image: { emoji: "🎨", label: "Picture" },
   story: { emoji: "📖", label: "Story" },
+  code: { emoji: "⌨️", label: "Code" },
 };

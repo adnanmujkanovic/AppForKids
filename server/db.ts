@@ -60,6 +60,31 @@ CREATE TABLE IF NOT EXISTS outbox (
 CREATE TABLE IF NOT EXISTS ai_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT, child_id TEXT, op TEXT NOT NULL, provider TEXT NOT NULL,
   ok INTEGER NOT NULL, ms INTEGER NOT NULL, input_tokens INTEGER, output_tokens INTEGER, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS friend_invites (
+  code TEXT PRIMARY KEY, family_id TEXT NOT NULL, child_id TEXT NOT NULL, used_by TEXT, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS friends (
+  child_id TEXT NOT NULL, friend_id TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (child_id, friend_id));
+CREATE TABLE IF NOT EXISTS inbox (
+  id TEXT PRIMARY KEY, token TEXT NOT NULL, from_child TEXT NOT NULL, to_child TEXT NOT NULL, note TEXT NOT NULL,
+  seen INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS reactions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, child_id TEXT NOT NULL, kind TEXT NOT NULL,
+  value TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE (project_id, child_id, kind, value));
+CREATE TABLE IF NOT EXISTS collaborators (
+  project_id TEXT NOT NULL, child_id TEXT NOT NULL, role TEXT NOT NULL, created_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, child_id));
+CREATE TABLE IF NOT EXISTS project_tasks (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL, text TEXT NOT NULL, assignee TEXT, done INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS plans (
+  id TEXT PRIMARY KEY, child_id TEXT NOT NULL, title TEXT NOT NULL, steps TEXT NOT NULL, created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS connectors (
+  family_id TEXT NOT NULL, kind TEXT NOT NULL, account TEXT NOT NULL, secret TEXT NOT NULL, created_at TEXT NOT NULL,
+  PRIMARY KEY (family_id, kind));
+CREATE TABLE IF NOT EXISTS deployments (
+  project_id TEXT PRIMARY KEY, repo TEXT NOT NULL, repo_url TEXT NOT NULL, pages_url TEXT, version INTEGER NOT NULL,
+  updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS detective_cases (
   id TEXT PRIMARY KEY, child_id TEXT NOT NULL, data TEXT NOT NULL, solved INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL);
@@ -72,7 +97,15 @@ export function openDb(path = process.env.SPARKFORGE_DB ?? "data/sparkforge.db")
   db = new DatabaseSync(path);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
   db.exec(SCHEMA);
+  // Additive migrations for databases created by earlier versions.
+  addColumn("project_versions", "by_child", "TEXT");
+  addColumn("outbox", "status", "TEXT NOT NULL DEFAULT 'kept'");
   return db;
+}
+
+function addColumn(table: string, column: string, def: string) {
+  const cols = db!.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) db!.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${def}`);
 }
 
 export function getDb(): DatabaseSync {

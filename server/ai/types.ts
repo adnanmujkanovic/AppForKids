@@ -31,6 +31,7 @@ export const ChatReplySchema = z.object({
   checkTip: z.string(),
   followUp: z.string(),
   suggestions: z.array(z.enum(SUGGESTIONS)),
+  sources: z.array(z.string()),
 });
 export type ChatReply = z.infer<typeof ChatReplySchema>;
 
@@ -47,6 +48,7 @@ export interface ChatRequest {
   image?: { mediaType: "image/png" | "image/jpeg" | "image/webp" | "image/gif"; data: string };
   projectContext?: string;
   persona?: string; // for app guides: "a friendly Mars guide"
+  webAccess?: boolean; // parent allowed kid-safe web search
 }
 
 export const GameResultSchema = z.object({
@@ -82,6 +84,28 @@ export const DetectiveSchema = z.object({
 });
 export type DetectiveCase = z.infer<typeof DetectiveSchema>;
 
+export const CodeChangeSchema = z.object({
+  understood: z.boolean(),
+  source: z.string(),
+  summary: z.string(),
+  explanation: z.string(),
+  concept: z.string(),
+});
+export type CodeChange = z.infer<typeof CodeChangeSchema>;
+
+export const AgentPlanSchema = z.object({
+  goal: z.string(),
+  steps: z.array(z.object({ title: z.string(), request: z.string(), why: z.string() })),
+});
+export type AgentPlan = z.infer<typeof AgentPlanSchema>;
+
+export const DayPlanSchema = z.object({
+  title: z.string(),
+  steps: z.array(z.object({ text: z.string(), when: z.string() })),
+  tip: z.string(),
+});
+export type DayPlan = z.infer<typeof DayPlanSchema>;
+
 export const UnderstandingSchema = z.object({ understood: z.boolean(), feedback: z.string() });
 export const ModerationSchema = z.object({ safe: z.boolean(), reason: z.string() });
 
@@ -106,4 +130,7 @@ export interface AIProvider {
   detective(ctx: ChildContext, topic: string): Promise<DetectiveCase>;
   checkUnderstanding(ctx: ChildContext, project: string, explanation: string): Promise<{ understood: boolean; feedback: string }>;
   moderate(text: string): Promise<{ safe: boolean; reason: string }>;
+  modifyCode(ctx: ChildContext, source: string, request: string, error?: string): Promise<CodeChange>;
+  agentPlan(ctx: ChildContext, kind: "game" | "app", spec: unknown, goal: string): Promise<AgentPlan>;
+  dayPlan(ctx: ChildContext, goal: string): Promise<DayPlan>;
 }

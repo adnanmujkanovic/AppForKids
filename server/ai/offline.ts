@@ -1,6 +1,6 @@
 // Offline provider: deterministic, rule-based stand-in for a model. It keeps every product
 // flow working without network or API keys, and is honest in the UI that it's "practice mode".
-import type { AIProvider, AppPlan, ChatReply, ChatRequest, ChildContext, DetectiveCase, Modification, Suggestion } from "./types";
+import type { AgentPlan, AIProvider, AppPlan, ChatReply, CodeChange, DayPlan, ChatRequest, ChildContext, DetectiveCase, Modification, Suggestion } from "./types";
 import { GAME_KIND_INFO, type GameKind, type GameSpec, normalizeGame } from "../../shared/game";
 import { type AppSpec, blankBlock, normalizeApp } from "../../shared/app";
 import { normalizeScene, normalizeStory, type SceneSpec, type StorySpec } from "../../shared/creations";
@@ -57,6 +57,7 @@ export class OfflineProvider implements AIProvider {
         checkTip: "",
         followUp: "",
         suggestions: [],
+        sources: [],
       };
     }
 
@@ -69,6 +70,7 @@ export class OfflineProvider implements AIProvider {
         checkTip: "",
         followUp: "Which part do you want to understand better?",
         suggestions: [],
+        sources: [],
       };
     }
 
@@ -81,6 +83,7 @@ export class OfflineProvider implements AIProvider {
         checkTip: "",
         followUp: "Which of those sounds most exciting?",
         suggestions: ["picture", "game"],
+        sources: [],
       };
     }
 
@@ -96,6 +99,7 @@ export class OfflineProvider implements AIProvider {
       checkTip: req.ctx.age >= 9 ? "Want to double-check? Ask a grown-up to look it up with you on a science site like NASA or National Geographic Kids." : "",
       followUp: this.followUp(topic),
       suggestions,
+      sources: [],
     };
   }
 
@@ -138,6 +142,7 @@ export class OfflineProvider implements AIProvider {
         checkTip: "",
         followUp: "What does the first question say?",
         suggestions: [],
+        sources: [],
       };
     }
     if (math) {
@@ -159,6 +164,7 @@ export class OfflineProvider implements AIProvider {
         checkTip: answersOk ? "Check it the other way round: use the opposite operation." : "",
         followUp: answersOk ? "Want to try a similar one on your own?" : "What answer did you get?",
         suggestions: [],
+        sources: [],
       };
     }
     const guess = m.match(/^\s*(-?\d+(?:\.\d+)?)\s*$/);
@@ -176,6 +182,7 @@ export class OfflineProvider implements AIProvider {
           checkTip: "",
           followUp: ok ? "Ready for the next question?" : "Want a hint?",
           suggestions: [],
+          sources: [],
         };
       }
     }
@@ -190,6 +197,7 @@ export class OfflineProvider implements AIProvider {
       checkTip: "",
       followUp: "What do you think the first step is?",
       suggestions: [],
+      sources: [],
     };
   }
 
@@ -625,6 +633,82 @@ export class OfflineProvider implements AIProvider {
           ? "Good start! Can you add a bit more? Try explaining what happens when the player touches something, or how the score changes."
           : "Nice! Try to mention one of the parts, like the score variable, the levels or a button, and what it does.",
     };
+  }
+
+  async modifyCode(ctx: ChildContext, source: string, request: string, error?: string): Promise<CodeChange> {
+    const r = request.toLowerCase();
+    let src = source;
+    const done: string[] = [];
+    if (/double|twice|2x/.test(r) && src.includes("game.score + thing.points")) {
+      src = src.replace("game.score + thing.points", "game.score + thing.points * 2 // double points!");
+      done.push("Things now give double points");
+    }
+    if (/(extra|more|bonus) li(fe|ves)/.test(r) && src.includes("game.onLevel((level) => {")) {
+      src = src.replace("game.onLevel((level) => {", "game.onLevel((level) => {\n  game.lives = game.lives + 1; // a bonus life every level");
+      done.push("You get a bonus life every level");
+    }
+    if (/(say|message|funny|joke).*(hit|bump|crash)|(hit|bump|crash).*(say|message|funny|joke)/.test(r) && src.includes("game.lives = game.lives - 1;")) {
+      src = src.replace("game.lives = game.lives - 1;", 'game.lives = game.lives - 1;\n  game.say("Oof! Watch out for the " + danger.name + "! 😵");');
+      done.push("The game says something when you get hit");
+    }
+    const help = ctx.helpLevel === "challenge" || ctx.helpLevel === "teach";
+    if (done.length && !help) {
+      return { understood: true, source: src, summary: done.join(", "), explanation: "I changed the lines marked with a comment. Press ▶ Run to try it!", concept: "Events" };
+    }
+    const undefinedName = error?.match(/(\w+) is not defined/)?.[1];
+    const hint = error
+      ? undefinedName
+        ? `The computer doesn't know the name “${undefinedName}”. Check the spelling — names must match exactly, even capital letters.`
+        : /Unexpected token|missing|Unexpected end/i.test(error)
+          ? "Something is missing, like a bracket ) } or a quote. Look at the line with the error and the line just before it."
+          : `The error says: “${error}”. Read the line it points to and check each word.`
+      : done.length
+        ? "Here's a hint: find the line that changes game.score (or game.lives) and change the math. You've got this!"
+        : "In practice mode I can only make a few changes, like “double points”, “an extra life every level” or “say something when I get hit”. You can change the code yourself too — try it!";
+    return { understood: false, source, summary: "", explanation: hint, concept: error ? "Debugging" : "" };
+  }
+
+  async agentPlan(_ctx: ChildContext, kind: "game" | "app", spec: unknown, goal: string): Promise<AgentPlan> {
+    const parts = goal.split(/\s*(?:,|;|\band then\b|\bthen\b|\band\b)\s*/i).map((x) => x.trim()).filter((x) => x.length > 2);
+    let steps = parts.map((p) => ({ title: capitalize(p), request: p, why: "One small change at a time is easier to test." }));
+    if (steps.length === 1 && kind === "game" && /harder|challenge|difficult/i.test(goal)) {
+      const have = new Set(((spec as GameSpec).hazards ?? []).map((h) => h.name.toLowerCase()));
+      const danger = ["meteor", "alien", "ghost", "bat", "storm"].find((d) => !have.has(d)) ?? "monster";
+      steps = [
+        { title: "Add a new danger", request: `add ${danger}s`, why: "More dangers make the player pay attention." },
+        { title: "Add a level", request: "add 1 level", why: "A new level gives an extra goal." },
+        { title: "Add a timer", request: "add a 60 second timer", why: "A timer adds pressure." },
+      ];
+    }
+    return { goal, steps: steps.slice(0, 5) };
+  }
+
+  async dayPlan(_ctx: ChildContext, goal: string): Promise<DayPlan> {
+    const g = goal.toLowerCase();
+    const steps = /test|exam|quiz/.test(g)
+      ? [
+          { text: "Find out which topics the test covers", when: "Today" },
+          { text: "Make a list of what you already know and what's tricky", when: "Today" },
+          { text: "Practice the tricky parts for 15 minutes", when: "Each day" },
+          { text: "Ask someone to quiz you", when: "The day before" },
+          { text: "Pack your things and get a good sleep", when: "The night before" },
+        ]
+      : /homework|worksheet|assignment/.test(g)
+        ? [
+            { text: "Read all the questions first", when: "Now" },
+            { text: "Do the easiest one to warm up", when: "Now" },
+            { text: "Take a 5-minute break", when: "After 20 minutes" },
+            { text: "Try the hard ones and mark where you get stuck", when: "" },
+            { text: "Check your answers", when: "Before you finish" },
+          ]
+        : [
+            { text: "Decide what “done” looks like", when: "Today" },
+            { text: "Break it into three small parts", when: "Today" },
+            { text: "Do the first part", when: "Next" },
+            { text: "Show someone and ask what they think", when: "" },
+            { text: "Finish and celebrate! 🎉", when: "" },
+          ];
+    return { title: capitalize(goal.slice(0, 60)), steps, tip: "Tick things off as you go — small steps add up!" };
   }
 
   async moderate(_text: string) {

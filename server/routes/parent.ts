@@ -16,6 +16,7 @@ import { defaultPermissions, MEDALS, PERMISSION_INFO, type Permissions } from ".
 import { creatorLevel, familyChildren, getChild } from "../engines/children";
 import { aiUsageToday, gatewayInfo } from "../ai/gateway";
 import { activateShare } from "./shares";
+import { friendsOf } from "../engines/social";
 
 export const authRouter = Router();
 export const parentRouter = Router();
@@ -190,6 +191,7 @@ parentRouter.get(
         medals: medals.map((m) => ({ ...MEDALS.find((x) => x.id === m.medal_id), earnedAt: m.created_at })),
         safety: highAlerts ? "attention" : openAlerts ? "review" : "ok",
         aiToday: aiUsageToday(c.id),
+        friends: friendsOf(c.id),
         activity14d: activity,
       };
     });
@@ -226,7 +228,7 @@ parentRouter.get(
       createdAt: s.created_at,
     }));
     const contacts = all<{ id: string; name: string; email: string }>("SELECT id, name, email FROM contacts WHERE family_id=? ORDER BY name", familyId);
-    const outbox = all<{ id: string; child_id: string; contact_id: string; subject: string; body: string; created_at: string }>(
+    const outbox = all<{ id: string; child_id: string; contact_id: string; subject: string; body: string; status: string; created_at: string }>(
       "SELECT * FROM outbox WHERE family_id=? ORDER BY created_at DESC LIMIT 20",
       familyId,
     ).map((o) => ({
@@ -235,6 +237,7 @@ parentRouter.get(
       to: contacts.find((c) => c.id === o.contact_id)?.name ?? "(removed contact)",
       subject: o.subject,
       body: o.body,
+      status: o.status,
       createdAt: o.created_at,
     }));
     return { children, alerts, shares, contacts, outbox, ai: gatewayInfo() };

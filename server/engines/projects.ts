@@ -3,7 +3,7 @@ import { all, newId, now, one, run, tx } from "../db";
 import type { JournalEntry, JournalKind, Project, ProjectSpec, ProjectSummary, ProjectType, ProjectVersion } from "../../shared/types";
 import type { GameSpec } from "../../shared/game";
 import type { AppSpec } from "../../shared/app";
-import type { SceneSpec, StorySpec } from "../../shared/creations";
+import type { CodeSpec, SceneSpec, StorySpec } from "../../shared/creations";
 
 interface Row {
   id: string;
@@ -53,6 +53,10 @@ export function specTitleEmoji(type: ProjectType, spec: ProjectSpec): { title: s
       const s = spec as StorySpec;
       return { title: s.title, emoji: s.pages[0]?.emoji ?? "📖" };
     }
+    case "code": {
+      const s = spec as CodeSpec;
+      return { title: s.title, emoji: s.emoji };
+    }
   }
 }
 
@@ -84,8 +88,17 @@ export function getProject(id: string) {
   return r ? toProject(r) : null;
 }
 
-export function listProjects(childId: string): ProjectSummary[] {
-  return all<Row>("SELECT * FROM projects WHERE child_id = ? AND deleted = 0 ORDER BY updated_at DESC", childId).map((r) => ({
+/** The child's own projects plus friends' projects they were invited to build. */
+export function listProjects(childId: string): (ProjectSummary & { team?: boolean })[] {
+  return all<Row & { team: number }>(
+    `SELECT p.*, 0 AS team FROM projects p WHERE p.child_id = ? AND p.deleted = 0
+     UNION ALL
+     SELECT p.*, 1 AS team FROM projects p JOIN collaborators c ON c.project_id = p.id WHERE c.child_id = ? AND p.deleted = 0
+     ORDER BY updated_at DESC`,
+    childId,
+    childId,
+  ).map((r) => ({
+    team: !!r.team,
     id: r.id,
     type: r.type,
     title: r.title,
@@ -96,7 +109,7 @@ export function listProjects(childId: string): ProjectSummary[] {
   }));
 }
 
-export function saveVersion(projectId: string, spec: ProjectSpec, summary: string, author: ProjectVersion["author"]) {
+export function saveVersion(projectId: string, spec: ProjectSpec, summary: string, author: ProjectVersion["author"], byName: string | null = null) {
   const p = getProject(projectId);
   if (!p) throw new Error("Project not found");
   const version = p.version + 1;
@@ -105,18 +118,18 @@ export function saveVersion(projectId: string, spec: ProjectSpec, summary: strin
   tx(() => {
     run("UPDATE projects SET spec=?, version=?, title=?, emoji=?, updated_at=? WHERE id=?", JSON.stringify(spec), version, title, emoji, t, projectId);
     run(
-      "INSERT INTO project_versions (project_id, version, spec, summary, author, created_at) VALUES (?,?,?,?,?,?)",
-      projectId, version, JSON.stringify(spec), summary.slice(0, 300), author, t,
+      "INSERT INTO project_versions (project_id, version, spec, summary, author, by_child, created_at) VALUES (?,?,?,?,?,?,?)",
+      projectId, version, JSON.stringify(spec), summary.slice(0, 300), author, byName, t,
     );
   });
   return getProject(projectId)!;
 }
 
 export function listVersions(projectId: string): ProjectVersion[] {
-  return all<{ version: number; summary: string; author: ProjectVersion["author"]; created_at: string }>(
-    "SELECT version, summary, author, created_at FROM project_versions WHERE project_id=? ORDER BY version DESC",
+  return all<{ version: number; summary: string; author: ProjectVersion["author"]; by_child: string | null; created_at: string }>(
+    "SELECT version, summary, author, by_child, created_at FROM project_versions WHERE project_id=? ORDER BY version DESC",
     projectId,
-  ).map((v) => ({ version: v.version, summary: v.summary, author: v.author, createdAt: v.created_at }));
+  ).map((v) => ({ version: v.version, summary: v.summary, author: v.author, byName: v.by_child, createdAt: v.created_at }));
 }
 
 export function getVersionSpec(projectId: string, version: number): ProjectSpec | null {

@@ -21,7 +21,12 @@ export type EventType =
   | "explained"
   | "code_viewed"
   | "mission_complete"
-  | "homework";
+  | "homework"
+  | "helped"
+  | "code_ran"
+  | "deployed"
+  | "planned"
+  | "agent_run";
 
 export interface Rewards {
   medals: Medal[];
@@ -82,6 +87,15 @@ const MEDAL_CHECKS: Record<string, (c: string) => boolean> = {
   "first-share": (c) => n("SELECT COUNT(*) n FROM events WHERE child_id=? AND type='shared'", c) >= 1,
   inspiration: (c) => n("SELECT COUNT(*) n FROM events WHERE child_id=? AND type='remixed_by_other'", c) >= 1,
   "creator-milestone": (c) => n("SELECT COUNT(*) n FROM projects WHERE child_id=? AND deleted=0", c) >= 10,
+  "community-helper": (c) => n("SELECT COUNT(*) n FROM events WHERE child_id=? AND type='helped'", c) >= 1,
+  "real-coder": (c) =>
+    n(
+      `SELECT COUNT(*) n FROM events r JOIN projects p ON p.id = r.project_id WHERE r.child_id=? AND r.type='code_ran'
+       AND json_extract(r.data,'$.ok')=1 AND p.type='code'
+       AND EXISTS (SELECT 1 FROM events m WHERE m.child_id=r.child_id AND m.project_id=r.project_id AND m.type='modified' AND m.id<r.id)`,
+      c,
+    ) >= 1,
+  shipped: (c) => n("SELECT COUNT(*) n FROM events WHERE child_id=? AND type='deployed'", c) >= 1,
   "i-broke-it": (c) => n("SELECT COUNT(*) n FROM events WHERE child_id=? AND type='restored'", c) >= 1,
   "try-again": (c) =>
     n(

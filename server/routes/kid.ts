@@ -22,11 +22,14 @@ import {
   saveVersion,
 } from "../engines/projects";
 import { missionProgress, settleMissions } from "../engines/missions";
+import { collaboratorsOf, isCollaborator, reactionsOf, tasksOf } from "../engines/social";
 import { activateShare, activeShare, createShare, sharesFor, type Audience } from "./shares";
 import { GAME_KINDS, GameSpecInput, autoFixGame, diffGames, gameConcepts, normalizeGame, testGame, type GameSpec } from "../../shared/game";
 import { AppSpecInput, appConcepts, autoFixApp, diffApps, normalizeApp, testApp, type AppSpec } from "../../shared/app";
-import { SceneSpec, StorySpec, normalizeScene, normalizeStory } from "../../shared/creations";
+import { CodeSpec, SceneSpec, StorySpec, normalizeCode, normalizeScene, normalizeStory } from "../../shared/creations";
 import type { ChildProfile, Permissions, ProjectType } from "../../shared/types";
+import { ejectGame } from "../../shared/export";
+import { projectHtml, STARTER_CODE } from "../engines/exporter";
 
 export const kidRouter = Router();
 kidRouter.use(requireChild);
@@ -55,11 +58,31 @@ function after(childId: string, projectId: string | null, concepts: string[] = [
   return evaluate(childId, projectId, concepts);
 }
 
+/** Owner-only actions: delete, share, send. */
 function ownProject(req: Request) {
   const p = getProject(String(req.params.id));
   if (!p || p.childId !== req.session!.childId) throw notFound("Project not found");
   return p;
 }
+
+/** Owner or an invited collaborator (a friend building together). */
+function editProject(req: Request) {
+  const p = getProject(String(req.params.id));
+  const childId = req.session!.childId!;
+  if (!p || (p.childId !== childId && !isCollaborator(p.id, childId))) throw notFound("Project not found");
+  return p;
+}
+
+/** When a friend helps build someone else's project, credit them and tell the owner. */
+function noteHelp(c: ChildProfile, p: { id: string; childId: string; title: string }, what: string) {
+  if (p.childId === c.id) return;
+  recordEvent(c.id, "helped", { projectId: p.id });
+  addJournal(p.id, "changed", `${c.name} helped: ${what}`);
+  notify(p.childId, "🫶", `${c.name} worked on your project “${p.title}”: ${what}`, `/kid/project/${p.id}?tab=history`);
+}
+
+/** Code is checked by its words (strings and comments), not its numbers. */
+const codeWords = (src: string) => (src.match(/(["'`])(?:\\.|(?!\1).)*\1|\/\/[^\n]*|\/\*[\s\S]*?\*\//g) ?? []).join(" \n ");
 
 /** All strings inside a structure (to safety-check what the child typed into a project). */
 const textsOf = (x: unknown): string[] =>
@@ -171,7 +194,7 @@ kidRouter.post(
     let projectId: string | null = null;
     if (b.thread.startsWith("project:")) {
       const p = getProject(b.thread.slice(8));
-      if (!p || p.childId !== c.id) throw notFound("Project not found");
+      if (!p || (p.childId !== c.id && !isCollaborator(p.id, c.id))) throw notFound("Project not found");
       projectId = p.id;
       mode = "builder";
       projectContext = `${p.type}: ${JSON.stringify(p.spec).slice(0, 8000)}`;
@@ -179,7 +202,7 @@ kidRouter.post(
 
     const ctx = childContext(c);
     const out = await callAI<ChatReply>("chat", c.id, ctx, c.permissions.dailyAiLimit, (ai) =>
-      ai.chat({ ctx, mode, history, message: text, image: b.image, projectContext }),
+      ai.chat({ ctx, mode, history, message: text, image: b.image, projectContext, webAccess: c.permissions.webAccess }),
     );
     save("user", b.image ? `📷 ${text}` : text);
     const meta = { ...out.data, reply: undefined, note: out.note, privacyTip: safety.childMessage, provider: out.provider };
@@ -319,15 +342,22 @@ kidRouter.get("/projects", h((req) => listProjects(req.session!.childId!)));
 kidRouter.get(
   "/projects/:id",
   h((req) => {
-    const p = ownProject(req);
+    const p = editProject(req);
     const c = me(req);
     return {
       project: p,
       versions: listVersions(p.id),
       journal: getJournal(p.id),
       shares: sharesFor(p.id),
-      concepts: p.type === "game" ? gameConcepts(p.spec as GameSpec) : p.type === "app" ? appConcepts(p.spec as AppSpec) : [],
+      concepts: p.type === "game" ? gameConcepts(p.spec as GameSpec) : p.type === "app" ? appConcepts(p.spec as AppSpec) : p.type === "code" ? ["Variables", "Events", "Conditions", "Functions"] : [],
       permissions: c.permissions,
+      role: p.childId === c.id ? "owner" : "collaborator",
+      owner: p.childId === c.id ? null : getChild(p.childId)?.name ?? null,
+      collaborators: collaboratorsOf(p.id),
+      tasks: tasksOf(p.id),
+      reactions: reactionsOf(p.id),
+      deployment: one("SELECT repo, repo_url AS repoUrl, pages_url AS pagesUrl, version, updated_at AS updatedAt FROM deployments WHERE project_id=?", p.id) ?? null,
+      githubReady: c.permissions.github && !!one("SELECT 1 FROM connectors WHERE family_id=? AND kind='github'", c.familyId),
     };
   }),
 );
@@ -335,7 +365,7 @@ kidRouter.get(
 kidRouter.get(
   "/projects/:id/versions/:v",
   h((req) => {
-    const p = ownProject(req);
+    const p = editProject(req);
     const spec = getVersionSpec(p.id, Number(req.params.v));
     if (!spec) throw notFound("Version not found");
     return { spec };
@@ -356,7 +386,7 @@ kidRouter.post(
   "/projects/:id/ai-change",
   h(async (req) => {
     const c = me(req);
-    const p = ownProject(req);
+    const p = editProject(req);
     const { request } = body(req, z.object({ request: z.string().trim().min(2).max(400) }));
     const g = guard(c, request, "change request");
     const ctx = childContext(c);
@@ -380,6 +410,15 @@ kidRouter.post(
       if (!out.data.understood) return { understood: false, explanation: out.data.explanation, note: out.note };
       ({ summary, explanation, concept } = out.data);
       next = out.data.spec;
+      note = out.note;
+    } else if (p.type === "code") {
+      need(c, "codeMode", "Code Mode");
+      const code = p.spec as CodeSpec;
+      const error = typeof req.body?.error === "string" ? req.body.error.slice(0, 500) : undefined;
+      const out = await callAI("modifyCode", c.id, ctx, c.permissions.dailyAiLimit, (ai) => ai.modifyCode(ctx, code.source, g.text, error));
+      if (!out.data.understood) return { understood: false, explanation: out.data.explanation, note: out.note };
+      ({ summary, explanation, concept } = out.data);
+      next = normalizeCode({ ...code, source: out.data.source });
       note = out.note;
     } else if (p.type === "image") {
       need(c, "imageGeneration", "Making pictures");
@@ -405,9 +444,10 @@ kidRouter.post(
       note = out.note;
     }
     const before = checksFor(p.type, p.spec).filter((x) => !x.passed).map((x) => x.id);
-    const saved = saveVersion(p.id, next as GameSpec, summary, "ai");
+    const saved = saveVersion(p.id, next as GameSpec, summary, "ai", c.name);
     addJournal(p.id, "changed", `Asked AI: “${g.text}”`);
     addJournal(p.id, "ai", summary);
+    noteHelp(c, p, summary);
     recordEvent(c.id, "modified", { projectId: p.id, topic: p.topic, data: { by: "ai" } });
     const aiChanges = one<{ n: number }>("SELECT COUNT(*) n FROM events WHERE child_id=? AND type='modified' AND json_extract(data,'$.by')='ai'", c.id)!.n;
     const concepts = [concept, ...(aiChanges >= 3 ? ["AI Prompting"] : [])].filter(Boolean);
@@ -422,7 +462,7 @@ kidRouter.put(
   "/projects/:id/spec",
   h((req) => {
     const c = me(req);
-    const p = ownProject(req);
+    const p = editProject(req);
     const raw = (req.body ?? {}).spec;
     let next: unknown;
     let changes: string[] = [];
@@ -443,6 +483,15 @@ kidRouter.put(
       if (!parsed.success) throw new HttpError(400, "That picture data doesn't look right.");
       next = normalizeScene(parsed.data);
       changes = ["Rearranged the picture"];
+    } else if (p.type === "code") {
+      need(c, "codeMode", "Code Mode");
+      const parsed = CodeSpec.safeParse(raw);
+      if (!parsed.success) throw new HttpError(400, "That code data doesn't look right.");
+      next = normalizeCode(parsed.data);
+      const before = (p.spec as CodeSpec).source.split("\n");
+      const after = (next as CodeSpec).source.split("\n");
+      const changed = after.filter((l, i) => l !== before[i]).length + Math.max(0, before.length - after.length);
+      changes = [`Changed ${changed} line${changed === 1 ? "" : "s"} of code`];
     } else {
       const parsed = StorySpec.safeParse(raw);
       if (!parsed.success) throw new HttpError(400, "That story data doesn't look right.");
@@ -451,7 +500,7 @@ kidRouter.put(
     }
     if (JSON.stringify(next) === JSON.stringify(p.spec)) return { project: p, unchanged: true };
     // Children's own words become visible on share pages, so they pass the safety filter too.
-    const texts = textsOf(next).join(" \n ");
+    const texts = p.type === "code" ? `${(next as CodeSpec).title} \n ${codeWords((next as CodeSpec).source)}` : textsOf(next).join(" \n ");
     const s = checkText(texts, c.age, "input");
     if (s.verdict === "block" || s.verdict === "support") {
       recordSafetyEvent(c.id, s, "project edit", texts.slice(0, 200));
@@ -465,8 +514,9 @@ kidRouter.put(
     const afterChecks = checksFor(p.type, next);
     const solved = before.filter((b) => afterChecks.find((a) => a.id === b.id)?.passed);
     const summary = (req.body?.summary as string | undefined)?.slice(0, 200) || changes.join(", ") || "Edited by me";
-    const saved = saveVersion(p.id, next as GameSpec, summary, "child");
+    const saved = saveVersion(p.id, next as GameSpec, summary, "child", c.name);
     for (const line of changes.slice(0, 6)) addJournal(p.id, "changed", line);
+    noteHelp(c, p, summary);
     recordEvent(c.id, "modified", { projectId: p.id, topic: p.topic, data: { by: "child" } });
     const concepts: string[] = [];
     for (const bug of solved) {
@@ -484,7 +534,7 @@ kidRouter.post(
   "/projects/:id/test",
   h((req) => {
     const c = me(req);
-    const p = ownProject(req);
+    const p = editProject(req);
     if (p.type !== "game" && p.type !== "app") throw new HttpError(400, "Only games and apps have tests.");
     const checks = checksFor(p.type, p.spec);
     recordEvent(c.id, "tested", { projectId: p.id, topic: p.topic, data: { failed: checks.filter((x) => !x.passed).length } });
@@ -496,12 +546,12 @@ kidRouter.post(
   "/projects/:id/fix",
   h((req) => {
     const c = me(req);
-    const p = ownProject(req);
+    const p = editProject(req);
     const { bugId } = body(req, z.object({ bugId: z.string().max(40) }));
     const bug = checksFor(p.type, p.spec).find((x) => x.bug?.id === bugId)?.bug;
     if (!bug) throw new HttpError(400, "That bug is already fixed! 🎉");
     const next = p.type === "game" ? autoFixGame(p.spec as GameSpec, bugId) : autoFixApp(p.spec as AppSpec, bugId);
-    const saved = saveVersion(p.id, next, `Fixed: ${bug.title.replace(/^🐛\s*/, "")}`, "fix");
+    const saved = saveVersion(p.id, next, `Fixed: ${bug.title.replace(/^🐛\s*/, "")}`, "fix", c.name);
     addJournal(p.id, "solved", `Fixed with AI: ${bug.title.replace(/^🐛\s*/, "")}`);
     recordEvent(c.id, "bug_fixed", { projectId: p.id, topic: p.topic, data: { how: "auto", bug: bugId } });
     return { project: saved, rewards: after(c.id, p.id, ["Debugging", bug.concept]) };
@@ -512,7 +562,7 @@ kidRouter.post(
   "/projects/:id/played",
   h((req) => {
     const c = me(req);
-    const p = ownProject(req);
+    const p = editProject(req);
     const b = body(req, z.object({ result: z.enum(["won", "lost", "quit"]), score: z.number().int().min(-100000).max(1000000).default(0) }));
     recordEvent(c.id, "game_played", { projectId: p.id, topic: p.topic, data: { result: b.result, score: b.score } });
     return { rewards: after(c.id, p.id) };
@@ -523,11 +573,11 @@ kidRouter.post(
   "/projects/:id/restore",
   h((req) => {
     const c = me(req);
-    const p = ownProject(req);
+    const p = editProject(req);
     const { version } = body(req, z.object({ version: z.number().int().min(1) }));
     const spec = getVersionSpec(p.id, version);
     if (!spec) throw notFound("Version not found");
-    const saved = saveVersion(p.id, spec, `Went back to version ${version}`, "child");
+    const saved = saveVersion(p.id, spec, `Went back to version ${version}`, "child", c.name);
     addJournal(p.id, "changed", `Went back to version ${version}`);
     recordEvent(c.id, "restored", { projectId: p.id, data: { version } });
     return { project: saved, rewards: after(c.id, p.id, ["Version Control"]) };
@@ -538,7 +588,7 @@ kidRouter.post(
   "/projects/:id/explain",
   h(async (req) => {
     const c = me(req);
-    const p = ownProject(req);
+    const p = editProject(req);
     const { text } = body(req, z.object({ text: z.string().trim().min(3).max(1500) }));
     const g = guard(c, text, "explanation");
     const ctx = childContext(c);
@@ -555,7 +605,7 @@ kidRouter.post(
   "/projects/:id/journal",
   h((req) => {
     const c = me(req);
-    const p = ownProject(req);
+    const p = editProject(req);
     const b = body(req, z.object({ kind: z.enum(["learned", "changed", "solved", "idea"]), text: z.string().trim().min(2).max(300) }));
     const g = guard(c, b.text, "journal");
     addJournal(p.id, b.kind, g.text);
@@ -567,12 +617,83 @@ kidRouter.post(
   "/projects/:id/code-viewed",
   h((req) => {
     const c = me(req);
-    const p = ownProject(req);
+    const p = editProject(req);
     const seen = one("SELECT 1 FROM events WHERE child_id=? AND type='code_viewed' AND project_id=?", c.id, p.id);
     if (!seen) recordEvent(c.id, "code_viewed", { projectId: p.id });
     return { rewards: after(c.id, p.id, ["Data"]) };
   }),
 );
+
+// ---------- Code Mode ----------
+
+kidRouter.post(
+  "/code",
+  h((req) => {
+    const c = me(req);
+    need(c, "codeMode", "Code Mode");
+    const { title } = body(req, z.object({ title: z.string().trim().max(60).default("") }));
+    const g = guard(c, title || "My code game", "code title");
+    const p = createProject(c.id, {
+      type: "code",
+      idea: "Write a game in real JavaScript",
+      description: "A game written in JavaScript on the SparkForge engine.",
+      topic: "code",
+      spec: normalizeCode({ title: g.text || "My code game", emoji: "⌨️", source: STARTER_CODE }),
+      aiHelped: ["wrote a starter program to build on"],
+    });
+    recordEvent(c.id, "project_created", { projectId: p.id, topic: "code" });
+    return { project: p, rewards: after(c.id, p.id, ["Variables", "Events", "Functions"]) };
+  }),
+);
+
+/** "Open in Code Mode": turn a game into real JavaScript the child can edit. */
+kidRouter.post(
+  "/projects/:id/eject",
+  h((req) => {
+    const c = me(req);
+    need(c, "codeMode", "Code Mode");
+    const src = editProject(req);
+    if (src.type !== "game") throw new HttpError(400, "Only games can be turned into code.");
+    const spec = src.spec as GameSpec;
+    const p = createProject(c.id, {
+      type: "code",
+      idea: `“${spec.title}” as real code`,
+      description: src.description,
+      topic: src.topic,
+      spec: normalizeCode({ title: `${spec.title} (code)`, emoji: spec.player.emoji, source: ejectGame(spec) }),
+      aiHelped: ["turned the game into JavaScript you can change"],
+    });
+    recordEvent(c.id, "project_created", { projectId: p.id, topic: src.topic });
+    return { project: p, rewards: after(c.id, p.id, ["Functions", "Events", "Variables"]) };
+  }),
+);
+
+kidRouter.post(
+  "/projects/:id/ran",
+  h((req) => {
+    const c = me(req);
+    const p = editProject(req);
+    const b = body(req, z.object({ ok: z.boolean(), error: z.string().max(300).default("") }));
+    recordEvent(c.id, "code_ran", { projectId: p.id, data: { ok: b.ok ? 1 : 0 } });
+    return { rewards: after(c.id, p.id, b.ok ? [] : ["Debugging"]) };
+  }),
+);
+
+/** Download a project as a single web page that works anywhere. */
+kidRouter.get("/projects/:id/export", (req, res, next) => {
+  try {
+    const p = editProject(req);
+    const owner = getChild(p.childId)!;
+    const html = projectHtml(p, owner.permissions.showCreatorName ? owner.name : "a young creator");
+    if (!html) throw new HttpError(400, "This kind of project can't be downloaded yet.");
+    const file = `${p.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "project"}.html`;
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${file}"`);
+    res.send(html);
+  } catch (e) {
+    next(e);
+  }
+});
 
 // ---------- Sharing ----------
 
@@ -619,27 +740,6 @@ kidRouter.get(
 );
 
 kidRouter.post(
-  "/projects/:id/send",
-  h((req) => {
-    const c = me(req);
-    const p = ownProject(req);
-    need(c, "emailSharing", "Sending to contacts");
-    const b = body(req, z.object({ contactId: z.string(), token: z.string(), message: z.string().max(300).default("") }));
-    const contact = one<{ id: string; name: string }>("SELECT id, name FROM contacts WHERE id=? AND family_id=?", b.contactId, req.session!.familyId);
-    if (!contact) throw notFound("Contact not found");
-    const share = activeShare(b.token);
-    if (share.project_id !== p.id) throw forbid("That link is for a different project.");
-    const g = guard(c, b.message, "message to contact");
-    run(
-      "INSERT INTO outbox (id, family_id, child_id, contact_id, subject, body, created_at) VALUES (?,?,?,?,?,?,?)",
-      newId("out"), req.session!.familyId, c.id, contact.id, `${c.name} made something: ${p.title}`,
-      `${g.text ? `${g.text}\n\n` : ""}Open it here: /s/${b.token}`, now(),
-    );
-    return { ok: true, to: contact.name };
-  }),
-);
-
-kidRouter.post(
   "/remix/:token",
   h((req) => {
     const c = me(req);
@@ -649,7 +749,7 @@ kidRouter.post(
     if (!src || !owner) throw notFound();
     if (!share.allow_remix || !owner.permissions.friendRemix) throw forbid("This creation can't be remixed.");
     if (owner.id === c.id) throw new HttpError(400, "That's already yours! Open it from My Creations.");
-    const perm: Record<ProjectType, keyof Permissions> = { game: "gameCreation", app: "appCreation", image: "imageGeneration", story: "storyCreation" };
+    const perm: Record<ProjectType, keyof Permissions> = { game: "gameCreation", app: "appCreation", image: "imageGeneration", story: "storyCreation", code: "codeMode" };
     need(c, perm[src.type], "Making this kind of project");
     const p = createProject(c.id, {
       type: src.type,
@@ -673,7 +773,7 @@ kidRouter.post(
   "/guide/:id",
   h(async (req) => {
     const c = me(req);
-    const p = ownProject(req);
+    const p = editProject(req);
     need(c, "aiGuideInApps", "AI guides in apps");
     need(c, "aiQuestions", "Asking AI");
     if (p.type !== "app") throw new HttpError(400, "Only apps have guides.");

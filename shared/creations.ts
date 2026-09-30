@@ -49,3 +49,11 @@ export function normalizeStory(x: StorySpec): StorySpec {
     moral: (x.moral || "").slice(0, 200),
   };
 }
+
+/** A Code Mode project: real JavaScript running on the SparkForge engine. */
+export const CodeSpec = z.object({ title: z.string(), emoji: z.string(), source: z.string() });
+export type CodeSpec = z.infer<typeof CodeSpec>;
+
+export function normalizeCode(x: CodeSpec): CodeSpec {
+  return { title: (x.title || "My Code").slice(0, 60), emoji: (x.emoji || "⌨️").slice(0, 8), source: (x.source || "").slice(0, 60000) };
+}

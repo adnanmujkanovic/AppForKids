@@ -121,7 +121,7 @@ describe("V1 definition of done — end to end", () => {
     await parent.post(`/api/parent/shares/${s.body.token}/approve`).send({}).expect(200);
     await request(app).get(`/api/share/${s.body.token}`).expect(200);
     const dash = (await parent.get("/api/parent/dashboard").expect(200)).body;
-    expect(dash.children[0].permissions.github).toBe(false); // future connectors stay off
+    expect(dash.children[0].permissions.github).toBe(true); // parents can now enable GitHub
   });
 
   it("gives the parent a useful, non-surveillance dashboard with safety alerts", async () => {

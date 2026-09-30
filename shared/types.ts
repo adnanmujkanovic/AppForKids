@@ -1,7 +1,7 @@
 // Types and catalogs shared by the server and the web client.
 import type { GameSpec } from "./game";
 import type { AppSpec } from "./app";
-import type { SceneSpec, StorySpec } from "./creations";
+import type { CodeSpec, SceneSpec, StorySpec } from "./creations";
 
 // ---------- Permissions (granular, parent-controlled) ----------
 
@@ -26,6 +26,12 @@ export interface Permissions {
   github: boolean;
   webAccess: boolean;
   aiAgents: boolean;
+  codeMode: boolean;
+  friends: boolean;
+  reactions: boolean;
+  friendComments: boolean;
+  collaboration: boolean;
+  seeFeed: boolean;
   dailyAiLimit: number;
 }
 
@@ -42,11 +48,17 @@ export const PERMISSION_INFO: { key: keyof Permissions; label: string; group: st
   { key: "shareNeedsApproval", label: "I approve every share first", group: "Sharing", help: "Links stay off until you approve them." },
   { key: "showCreatorName", label: "Show first name on shared pages", group: "Sharing", help: "Otherwise shown as “a young creator”." },
   { key: "publicPublishing", label: "Public publishing", group: "Sharing", help: "A public project URL. Off by default." },
+  { key: "friends", label: "Friends", group: "Friends", help: "Connect with children from families you trust, using a friend code you share with their parent." },
+  { key: "reactions", label: "Friends can react", group: "Friends", help: "Friends can leave emoji reactions on shared creations." },
+  { key: "friendComments", label: "Friendly comments", group: "Friends", help: "Friends can pick from a list of kind, preset comments. No free-text chat." },
+  { key: "collaboration", label: "Build together", group: "Friends", help: "Invite friends to help build a project." },
+  { key: "seeFeed", label: "Creator Feed", group: "Friends", help: "See public creations from other kids (no rankings, no follower counts)." },
   { key: "emailSharing", label: "Send to approved contacts", group: "Connectors", help: "Only people you add below." },
   { key: "photoUpload", label: "Upload homework photos", group: "Learn", help: "" },
-  { key: "github", label: "GitHub", group: "Connectors", help: "Real code repositories.", future: true },
-  { key: "webAccess", label: "Web access for AI", group: "AI", help: "Let AI look things up on the web.", future: true },
-  { key: "aiAgents", label: "AI agents", group: "AI", help: "Multi-step AI helpers.", future: true },
+  { key: "codeMode", label: "Code Mode", group: "Build", help: "Write real JavaScript. It runs in a locked-down sandbox with no internet access." },
+  { key: "github", label: "GitHub", group: "Connectors", help: "Save projects to your GitHub account and put them on the web. Connect GitHub below first." },
+  { key: "webAccess", label: "Web access for AI", group: "AI", help: "Live AI can search a short list of kid-safe sites (NASA, National Geographic Kids, Britannica…) and shows its sources." },
+  { key: "aiAgents", label: "AI agents", group: "AI", help: "An AI helper that plans a multi-step change, shows the plan for approval, then builds it step by step." },
 ];
 
 export function defaultPermissions(age: number): Permissions {
@@ -69,7 +81,13 @@ export function defaultPermissions(age: number): Permissions {
     homeworkMode: "teach",
     github: false,
     webAccess: false,
-    aiAgents: false,
+    aiAgents: age >= 10,
+    codeMode: age >= 9,
+    friends: !young,
+    reactions: true,
+    friendComments: !young,
+    collaboration: !young,
+    seeFeed: false,
     dailyAiLimit: young ? 60 : 120,
   };
 }
@@ -99,8 +117,8 @@ export interface ChildProfile {
   permissions: Permissions;
 }
 
-export type ProjectType = "game" | "app" | "image" | "story";
-export type ProjectSpec = GameSpec | AppSpec | SceneSpec | StorySpec;
+export type ProjectType = "game" | "app" | "image" | "story" | "code";
+export type ProjectSpec = GameSpec | AppSpec | SceneSpec | StorySpec | CodeSpec;
 
 export interface ProjectSummary {
   id: string;
@@ -123,6 +141,7 @@ export interface ProjectVersion {
   version: number;
   summary: string;
   author: "ai" | "child" | "fix";
+  byName?: string | null;
   createdAt: string;
 }
 
@@ -170,7 +189,9 @@ export const MEDALS: Medal[] = [
   { id: "publisher", emoji: "🌍", title: "Publisher", about: "Publish a project." },
   { id: "first-share", emoji: "👋", title: "First Share", about: "Share a creation with someone." },
   { id: "inspiration", emoji: "💫", title: "Inspiration", about: "Someone remixed your creation." },
-  { id: "community-helper", emoji: "🫶", title: "Community Helper", about: "Help another creator.", future: true },
+  { id: "community-helper", emoji: "🫶", title: "Community Helper", about: "Help build a friend's project." },
+  { id: "real-coder", emoji: "⌨️", title: "Real Coder", about: "Change real JavaScript code and run it." },
+  { id: "shipped", emoji: "🛳️", title: "Shipped It", about: "Put a project on the web with GitHub." },
   { id: "creator-milestone", emoji: "🏆", title: "Creator Milestone", about: "Complete 10 projects." },
   // Surprise achievements — discovered, not announced.
   { id: "i-broke-it", emoji: "💥", title: "I Broke It", about: "Went back to an older version after an experiment.", hidden: true },
@@ -201,6 +222,10 @@ export const CONCEPTS: Record<string, { emoji: string; young: string; older: str
   Debugging: { emoji: "🐛", young: "Debugging means finding why something doesn't work and fixing it.", older: "Debugging: reproduce the problem, form a guess about the cause, test it, fix it." },
   Testing: { emoji: "✅", young: "Testing means checking your project works the way you want.", older: "Tests ask specific questions (can I win? can I lose?) and report pass or fail." },
   "Version Control": { emoji: "🕰️", young: "Every version is saved, so you can always go back.", older: "Version control records each change so you can compare, undo and experiment safely." },
+  Functions: { emoji: "🧰", young: "A function is a set of steps with a name. You can use it again and again.", older: "A function packages steps under a name. Event handlers like onCollect are functions the engine calls for you." },
+  Repositories: { emoji: "🐙", young: "A repository is a folder online that keeps your project and all its versions.", older: "A repository (repo) stores a project's files and history. Each saved change is a commit." },
+  Deployment: { emoji: "🌍", young: "Deploying means putting your project on the internet so anyone with the link can use it.", older: "Deployment publishes a build to a server (here, GitHub Pages) so it runs at a public URL." },
+  Teamwork: { emoji: "🤝", young: "Building together means sharing jobs and helping each other.", older: "Collaboration splits work into tasks and roles, and every change is tracked by who made it." },
   Prompting: { emoji: "🎨", young: "Describing your picture clearly helps AI make it.", older: "Image prompts combine subject, setting and style." },
 };
 

@@ -2,10 +2,13 @@
 // so the rest of the app only ever sees well-formed data.
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
-import type { BetaMessageParam } from "@anthropic-ai/sdk/resources/beta/messages/messages";
+import type { BetaMessageParam, BetaToolUnion } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 import { z } from "zod";
 import {
+  AgentPlanSchema,
   AppPlanSchema,
+  CodeChangeSchema,
+  DayPlanSchema,
   AppResultSchema,
   ChatReplySchema,
   DetectiveSchema,
@@ -20,7 +23,12 @@ import {
   type Modification,
 } from "./types";
 import {
+  AGENT_TASK,
   APP_PLAN_TASK,
+  CODE_TASK,
+  DAY_PLAN_TASK,
+  KID_SAFE_DOMAINS,
+  WEB_LAYER,
   APP_TASK,
   CHAT_FORMAT,
   DETECTIVE_TASK,
@@ -63,17 +71,26 @@ export class ClaudeProvider implements AIProvider {
     schema: S,
     effort: Effort,
     maxTokens = 16000,
+    tools?: BetaToolUnion[],
   ): Promise<z.infer<S>> {
-    const res = await this.client.beta.messages.parse({
-      model: this.model,
-      max_tokens: maxTokens,
-      system,
-      messages,
-      output_config: { effort, format: betaZodOutputFormat(schema) },
-      // Server-side fallback: if a safeguard declines, the API retries on a suitable model.
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
-    });
+    const convo = [...messages];
+    let res;
+    // Server tools (web search) may pause a long turn; continue it a few times.
+    for (let turn = 0; ; turn++) {
+      res = await this.client.beta.messages.parse({
+        model: this.model,
+        max_tokens: maxTokens,
+        system,
+        messages: convo,
+        output_config: { effort, format: betaZodOutputFormat(schema) },
+        ...(tools ? { tools } : {}),
+        // Server-side fallback: if a safeguard declines, the API retries on a suitable model.
+        betas: ["server-side-fallback-2026-07-01"],
+        fallbacks: "default",
+      });
+      if (res.stop_reason !== "pause_turn" || turn >= 3) break;
+      convo.push({ role: "assistant", content: res.content });
+    }
     this.lastUsage = { input: res.usage.input_tokens, output: res.usage.output_tokens };
     if (res.stop_reason === "refusal") throw new RefusalError(res.stop_details?.explanation ?? "refused");
     if (res.stop_reason === "max_tokens") throw new Error("Response was cut off (max_tokens)");
@@ -95,13 +112,27 @@ export class ClaudeProvider implements AIProvider {
       : req.message;
     // The API needs alternating roles starting with user; drop a leading assistant turn if present.
     while (history.length && history[0].role !== "user") history.shift();
-    return this.structured(
-      `${systemPrompt(req.ctx, req.mode, req.projectContext, req.persona)}\n\n${CHAT_FORMAT}`,
+    const tools: BetaToolUnion[] | undefined = req.webAccess
+      ? [{ type: "web_search_20260209", name: "web_search", max_uses: 3, allowed_domains: KID_SAFE_DOMAINS }]
+      : undefined;
+    const out = await this.structured(
+      `${systemPrompt(req.ctx, req.mode, req.projectContext, req.persona)}${req.webAccess ? `\n\n${WEB_LAYER}` : ""}\n\n${CHAT_FORMAT}`,
       [...history, { role: "user", content }],
       ChatReplySchema,
       "low",
-      4000,
+      8000,
+      tools,
     );
+    // Only show links to the allowed kid-safe sites.
+    const allowed = (u: string) => {
+      try {
+        const host = new URL(u).hostname;
+        return KID_SAFE_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`));
+      } catch {
+        return false;
+      }
+    };
+    return { ...out, sources: req.webAccess ? out.sources.filter(allowed).slice(0, 5) : [] };
   }
 
   async scene(ctx: ChildContext, prompt: string) {
@@ -200,6 +231,38 @@ export class ClaudeProvider implements AIProvider {
       "low",
       2000,
     );
+  }
+
+  async modifyCode(ctx: ChildContext, source: string, request: string, error?: string) {
+    const out = await this.structured(
+      this.sys(ctx, CODE_TASK),
+      [
+        {
+          role: "user",
+          content: `Current code:\n<code>\n${source}\n</code>\n${error ? `Error when running it: ${error}\n` : ""}Request from the child: ${request || "Please help me fix the error."}`,
+        },
+      ],
+      CodeChangeSchema,
+      "medium",
+      32000,
+    );
+    return { ...out, source: out.understood ? out.source : source };
+  }
+
+  async agentPlan(ctx: ChildContext, kind: "game" | "app", spec: unknown, goal: string) {
+    const out = await this.structured(
+      this.sys(ctx, AGENT_TASK),
+      [{ role: "user", content: `Project (${kind}):\n${JSON.stringify(spec).slice(0, 12000)}\n\nGoal: ${goal}` }],
+      AgentPlanSchema,
+      "medium",
+      4000,
+    );
+    return { ...out, steps: out.steps.slice(0, 5) };
+  }
+
+  async dayPlan(ctx: ChildContext, goal: string) {
+    const out = await this.structured(this.sys(ctx, DAY_PLAN_TASK, "tutor"), [{ role: "user", content: goal }], DayPlanSchema, "low", 3000);
+    return { ...out, steps: out.steps.slice(0, 8) };
   }
 
   async moderate(text: string) {

@@ -260,3 +260,10 @@ button.chip:hover { filter: brightness(0.97); }
 .badge-sev.high { background: #ffd0ca; color: #b3261e; }
 .badge-sev.medium { background: var(--sun-soft); color: #8a5d00; }
 .badge-sev.low { background: #f0eef5; color: var(--ink-2); }
+
+/* Code Mode */
+.codeedit { display: flex; background: #16142a; border-radius: 16px; overflow: hidden; height: 560px; }
+.codeedit .gutter { padding: 14px 8px; color: #6d6a8a; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.85rem; line-height: 1.6; text-align: right; overflow: hidden; user-select: none; min-width: 42px; }
+.codeedit .gutter .err { color: #fff; background: #d94a3b; border-radius: 4px; padding: 0 3px; }
+.codeedit textarea { flex: 1; border: 0; border-radius: 0; background: transparent; color: #e8e4ff; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.85rem; line-height: 1.6; padding: 14px 12px; resize: none; min-height: 0; white-space: pre; overflow: auto; tab-size: 2; }
+.codeedit textarea:focus { border: 0; }
