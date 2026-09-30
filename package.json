@@ -1,0 +1,48 @@
+{
+  "name": "sparkforge-kids",
+  "version": "1.0.0",
+  "description": "SparkForge Kids — Ask. Create. Build. Share.",
+  "scripts": {
+    "dev": "concurrently -k -n api,web \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "NODE_OPTIONS=--no-warnings=ExperimentalWarning tsx watch server/index.ts",
+    "dev:web": "vite",
+    "build": "vite build",
+    "start": "NODE_ENV=production NODE_OPTIONS=--no-warnings=ExperimentalWarning tsx server/index.ts",
+    "test": "NODE_OPTIONS=--no-warnings=ExperimentalWarning vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/adnanmujkanovic/AppForKids.git"
+  },
+  "bugs": {
+    "url": "https://github.com/adnanmujkanovic/AppForKids/issues"
+  },
+  "homepage": "https://github.com/adnanmujkanovic/AppForKids#readme",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.129.0",
+    "express": "^5.2.1",
+    "nodemailer": "^10.0.13",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-router-dom": "^7.18.4",
+    "tsx": "^4.23.15",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.3",
+    "@types/nodemailer": "^8.0.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/supertest": "^7.2.1",
+    "@vitejs/plugin-react": "^6.1.1",
+    "concurrently": "^10.0.5",
+    "supertest": "^7.3.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.1",
+    "vitest": "^5.0.3"
+  },
+  "type": "module",
+  "private": true
+}
