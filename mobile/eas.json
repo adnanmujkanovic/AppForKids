@@ -9,11 +9,11 @@
     "preview": {
       "distribution": "internal",
       "android": { "buildType": "apk" },
-      "env": { "EXPO_PUBLIC_API_URL": "https://sparkforge.example.com" }
+      "env": { "EXPO_PUBLIC_API_URL": "https://136-64-122-241.sslip.io" }
     },
     "production": {
       "autoIncrement": true,
-      "env": { "EXPO_PUBLIC_API_URL": "https://sparkforge.example.com" }
+      "env": { "EXPO_PUBLIC_API_URL": "https://136-64-122-241.sslip.io" }
     }
   },
   "submit": { "production": {} }
