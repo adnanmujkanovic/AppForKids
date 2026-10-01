@@ -29,6 +29,8 @@ docker build -t sparkforge-kids .
 docker run -p 3001:3001 -v sparkforge-data:/app/data -e ANTHROPIC_API_KEY=... sparkforge-kids
 ```
 
+**Deploy for free** on Oracle Cloud or Google Cloud with HTTPS and automatic updates: see [deploy/README.md](deploy/README.md).
+
 On phones, open the site and choose **Add to Home Screen**: SparkForge installs as an app (PWA).
 
 ### AI provider
