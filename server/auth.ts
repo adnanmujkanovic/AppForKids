@@ -66,8 +66,12 @@ function readCookie(req: Request, name: string): string | null {
   return null;
 }
 
+/** Native apps send the session token as a bearer header instead of a cookie. */
+export const isNativeClient = (req: Request) => req.get("x-sparkforge-client") === "native";
+
 export function loadSession(req: Request, _res: Response, next: NextFunction) {
-  const token = readCookie(req, COOKIE);
+  const bearer = req.get("authorization")?.match(/^Bearer\s+([\w-]{20,})$/)?.[1];
+  const token = bearer ?? readCookie(req, COOKIE);
   if (token) {
     const r = one<{ token: string; role: Session["role"]; family_id: string; parent_id: string | null; child_id: string | null; expires_at: string }>(
       "SELECT * FROM sessions WHERE token = ?",

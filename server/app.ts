@@ -24,6 +24,21 @@ export function createApp() {
     }
     next();
   });
+  // Optional CORS for development clients (e.g. the Expo web preview). Native apps don't need CORS.
+  const corsOrigins = (process.env.SPARKFORGE_CORS_ORIGINS ?? "").split(",").map((o) => o.trim()).filter(Boolean);
+  if (corsOrigins.length) {
+    app.use("/api", (req, res, next) => {
+      const origin = req.get("origin");
+      if (origin && corsOrigins.includes(origin)) {
+        res.setHeader("Access-Control-Allow-Origin", origin);
+        res.setHeader("Vary", "Origin");
+        res.setHeader("Access-Control-Allow-Headers", "content-type, authorization, x-sparkforge-client");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+        if (req.method === "OPTIONS") return res.status(204).end();
+      }
+      next();
+    });
+  }
   app.use(loadSession);
   app.get("/api/health", (_req, res) => res.json({ ok: true }));
   app.use("/api", authRouter);

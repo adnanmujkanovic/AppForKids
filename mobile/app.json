@@ -1,0 +1,52 @@
+{
+  "expo": {
+    "name": "SparkForge Kids",
+    "slug": "sparkforge-kids",
+    "scheme": "sparkforge",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#f8f5ff",
+    "ios": {
+      "bundleIdentifier": "app.sparkforge.kids",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Choose a photo of your homework so SparkForge can help you understand it.",
+        "NSCameraUsageDescription": "Take a photo of your homework so SparkForge can help you understand it.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "app.sparkforge.kids",
+      "adaptiveIcon": {
+        "backgroundColor": "#5b3df5",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "output": "single"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Choose a photo of your homework so SparkForge can help you understand it.",
+          "cameraPermission": "Take a photo of your homework so SparkForge can help you understand it."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": false
+    },
+    "extra": {
+      "apiUrl": "http://localhost:3001"
+    }
+  }
+}
