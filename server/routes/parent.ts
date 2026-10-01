@@ -5,6 +5,7 @@ import {
   clearFailures,
   endSession,
   hashPassword,
+  isNativeClient,
   noteFailure,
   requireParent,
   startSession,
@@ -58,8 +59,8 @@ authRouter.post(
         parentId, familyId, b.email, b.name, hashPassword(b.password), now(),
       );
     });
-    startSession(res, { role: "parent", familyId, parentId, childId: null });
-    return { ok: true };
+    const session = startSession(res, { role: "parent", familyId, parentId, childId: null });
+    return { ok: true, ...(isNativeClient(req) ? { token: session.token } : {}) };
   }),
 );
 
@@ -76,8 +77,8 @@ authRouter.post(
     }
     clearFailures(key);
     if (req.session) endSession(req, res);
-    startSession(res, { role: "parent", familyId: p.family_id, parentId: p.id, childId: null });
-    return { ok: true };
+    const session = startSession(res, { role: "parent", familyId: p.family_id, parentId: p.id, childId: null });
+    return { ok: true, ...(isNativeClient(req) ? { token: session.token } : {}) };
   }),
 );
 
@@ -156,8 +157,8 @@ parentRouter.post(
     const c = ownChild(req.session!.familyId, String(req.params.id));
     const parentId = req.session!.parentId;
     endSession(req, res);
-    startSession(res, { role: "child", familyId: c.familyId, parentId, childId: c.id });
-    return { ok: true };
+    const session = startSession(res, { role: "child", familyId: c.familyId, parentId, childId: c.id });
+    return { ok: true, ...(isNativeClient(req) ? { token: session.token } : {}) };
   }),
 );
 

@@ -51,16 +51,42 @@ Environment variables (see `.env.example`):
 
 If a live AI call fails or the model declines, the gateway falls back to practice mode for that request and tells the child.
 
+## Native iOS & Android apps
+
+`mobile/` is a native app built with Expo (SDK 57, React Native 0.86, expo-router). It talks to the same API as the web app and covers both the parent and child experience: sign in, family settings and permissions, friends, connectors, and for kids Explore chat, pictures, stories, games (Play / Build / Test / Code), apps, Learn, Missions, Passport, Bug Detective, planner, friends feed and sharing. Games and app runtimes run inside a locked-down WebView (no network, storage or file access), with the same engines the web app uses.
+
+```bash
+npm run dev:api                     # 1. start the API (port 3001)
+cd mobile && npm install
+npx expo start                      # 2. press i (iOS simulator), a (Android emulator) or scan the QR code with Expo Go
+```
+
+Point the app at your server with `EXPO_PUBLIC_API_URL=http://<your-computer-ip>:3001 npx expo start` (a phone can't reach `localhost` on your computer). Parents can also change it under **⚙️ Server settings** on the welcome screen.
+
+The app signs in with a bearer token kept in the device keychain (`expo-secure-store`) rather than cookies. The server issues tokens only to requests sent with `x-sparkforge-client: native`. To run the app in a browser for development (`npx expo start --web`), allow its origin on the API: `SPARKFORGE_CORS_ORIGINS=http://localhost:8081`.
+
+**Store builds** use [EAS](https://expo.dev/eas) (profiles in `mobile/eas.json`; set `EXPO_PUBLIC_API_URL` for each profile to your deployed server):
+
+```bash
+npm i -g eas-cli && eas login
+eas build --platform ios --profile production       # needs an Apple Developer account
+eas build --platform android --profile production   # needs a Google Play developer account
+eas submit --platform ios && eas submit --platform android
+```
+
+Kids apps go through extra store review. Apple's Kids category and Google Play's Families policy require parental gates for outside links and purchases, no third-party analytics or ads, and a privacy policy. SparkForge already sends nothing to analytics, keeps sharing behind parent approval, and puts connectors and settings in the parent area.
+
 ## Checks
 
 ```bash
 npm test             # engines, safety, Claude provider glue, and the full V1 end-to-end API flow
 npm run typecheck
+cd mobile && npm run typecheck && npx expo export --platform ios --platform android   # native app
 ```
 
 ## What's in it
 
-Everything in the spec's **MVP "Must have"** and **"Should have"** lists, and the **"Later"** list (see *Not included* below for the two exceptions):
+Everything in the spec's **MVP "Must have"** and **"Should have"** lists, and the **"Later"** list (see *Not included* below for the one exception):
 
 | Area | What works |
 |---|---|
@@ -117,4 +143,3 @@ web/ (React + Vite)           server/ (Express, TypeScript)                 shar
 ## Not included
 
 - **Pixel image generation.** Pictures are AI-composed emoji scenes. A real image model needs a vendor choice; the scene/`ImageAsset` boundary is where it would plug in.
-- **A native iOS/Android app.** The PWA installs on both platforms. A React Native / Expo shell could wrap the same API later.

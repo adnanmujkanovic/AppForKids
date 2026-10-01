@@ -11,7 +11,12 @@
   var W = 360, H = 480, HIT = 30;
 
   function report(type, data) {
-    try { parent.postMessage(Object.assign({ sparkforge: type }, data || {}), "*"); } catch (e) { /* standalone */ }
+    var msg = Object.assign({ sparkforge: type }, data || {});
+    try {
+      // Native app (react-native-webview) or browser iframe.
+      if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify(msg));
+      else parent.postMessage(msg, "*");
+    } catch (e) { /* standalone page */ }
   }
 
   function el(tag, css, text) {
