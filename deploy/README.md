@@ -1,19 +1,27 @@
 # Deploying SparkForge Kids (free)
 
-This puts the API and web app on a free cloud server with HTTPS, so the iOS and Android apps and other people's browsers can reach it. It takes about 30 minutes the first time.
+This puts the API and web app on a free cloud server (Google Cloud e2-micro, or Oracle Cloud) with HTTPS, so the iOS and Android apps and other people's browsers can reach it. It takes about 30 minutes the first time.
 
 **How it works:** every merge to `main` runs the **Release image** workflow, which builds the server image (x86 and ARM) and publishes it to GitHub Container Registry. The server runs that image behind [Caddy](https://caddyserver.com), which gets and renews the HTTPS certificate automatically. A cron job checks for a new image every 5 minutes and restarts the app when there is one. All data (database, encryption key) lives in `~/sparkforge/data` on the server.
 
-## 1. Create the server (Oracle Cloud Always Free)
+## 1. Create the server (Google Cloud free e2-micro)
 
-1. Sign up at [oracle.com/cloud/free](https://www.oracle.com/cloud/free/). A card is needed to verify you, but Always Free resources are not charged. Pick a home region near you; it can't be changed later.
-2. **Compute → Instances → Create instance**
-   - Image: **Ubuntu 24.04** (Canonical)
-   - Shape: **Ampere → VM.Standard.A1.Flex**, 2 OCPUs, 12 GB memory (within the free allowance). If it says "out of capacity", try another availability domain or try again later; or use **VM.Standard.E2.1.Micro** (also free, smaller).
-   - Networking: keep "Assign a public IPv4 address" on.
-   - SSH keys: upload your public key (or let it generate one and download it).
-3. Open the web ports: on the instance page, click the **subnet → Security list → Add ingress rules**: source `0.0.0.0/0`, TCP, destination ports `80,443`.
-4. Copy the instance's **public IP address**.
+1. Create an account at [cloud.google.com/free](https://cloud.google.com/free) (a card is needed to verify you). New accounts also get trial credit; the e2-micro stays free after the trial ends.
+2. In [Billing → Budgets & alerts](https://console.cloud.google.com/billing/budgets), add a budget of $1 with email alerts, so you hear about any charge right away.
+3. Open [Compute Engine → VM instances](https://console.cloud.google.com/compute/instances) (enable the Compute Engine API when asked) → **Create instance**. These settings keep it inside the free tier:
+   - Region: **us-west1**, **us-central1** or **us-east1** (other regions are not free)
+   - Machine type: **E2 → e2-micro**
+   - Boot disk: **Ubuntu 24.04 LTS (x86/64)**, disk type **Standard persistent disk** (the default "Balanced" is *not* free), size **30 GB**
+   - Firewall: tick **Allow HTTP traffic** and **Allow HTTPS traffic**
+4. Copy the instance's **External IP**. It stays the same while the VM runs; if you stop and start the VM it can change, so update your DNS record then.
+
+<details><summary>Oracle Cloud Always Free instead</summary>
+
+1. Sign up at [oracle.com/cloud/free](https://www.oracle.com/cloud/free/) and pick a home region near you.
+2. **Compute → Instances → Create instance**: Ubuntu 24.04, shape **VM.Standard.A1.Flex** (2 OCPUs, 12 GB) or **VM.Standard.E2.1.Micro**, public IPv4 on, upload your SSH key.
+3. On the instance's **subnet → Security list → Add ingress rules**: source `0.0.0.0/0`, TCP, ports `80,443`.
+4. Copy the public IP. Use `ubuntu@<ip>` for SSH below.
+</details>
 
 ## 2. Get a domain name
 
@@ -28,15 +36,16 @@ The image is private while the repository is private. Either:
 
 ## 4. Run the setup script
 
-From a checkout of this repo on your computer:
+Copy the `deploy` folder to the server and run the script. On Google Cloud the easiest way is the **SSH** button next to the VM: in that window use **Upload file** to upload `deploy.zip` (zip the repo's `deploy` folder first), then:
 
 ```bash
-scp -r deploy ubuntu@<server-ip>:
-ssh ubuntu@<server-ip>
+sudo apt-get install -y unzip && unzip deploy.zip
 bash deploy/setup.sh sparkforge-family.duckdns.org
 # with a private image:
 GHCR_USER=<your-github-username> GHCR_TOKEN=<token> bash deploy/setup.sh sparkforge-family.duckdns.org
 ```
+
+With SSH from your own computer instead: `scp -r deploy <user>@<server-ip>:` then `ssh <user>@<server-ip>`.
 
 It installs Docker, opens the VM firewall, writes `~/sparkforge/.env` (with a fresh random `SPARKFORGE_SECRET`), starts the app and Caddy, and installs the update cron job. After a minute, open `https://<your-domain>`.
 
@@ -62,6 +71,6 @@ sudo docker compose ps              # status
 ./update.sh                         # update now instead of waiting for cron
 ```
 
-## Other hosts
+## Limits of the free server
 
-`setup.sh` works on any Ubuntu 22.04/24.04 server with ports 80/443 open. On **Google Cloud's free e2-micro** (us-west1, us-central1 or us-east1; 30 GB standard disk), allow HTTP/HTTPS traffic when creating the VM and run the same steps. Its free tier includes only 1 GB/month of outbound traffic, so it suits a family or small group.
+Google's free tier includes 1 GB/month of outbound traffic (about $0.12/GB beyond that), which suits a family or small group. `setup.sh` works on any Ubuntu 22.04/24.04 server with ports 80/443 open, so you can move to a bigger host later: copy `~/sparkforge/data` and `.env` across.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-time server setup for SparkForge Kids on a fresh Ubuntu 22.04/24.04 VM
-# (Oracle Cloud Always Free, Google Cloud e2-micro, or any other host).
+# (Google Cloud e2-micro, Oracle Cloud Always Free, or any other host).
 #
 #   scp -r deploy ubuntu@<server-ip>:      # from your computer
 #   ssh ubuntu@<server-ip>
